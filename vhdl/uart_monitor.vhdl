@@ -1418,7 +1418,7 @@ begin
               sentField12<=history_buffer(143 downto 136); --remember new data
               print_field("011100" & history_buffer(143 downto 142) & "11" & history_buffer(141 downto 136),ShowField13);
             else -- otherwise skip
-              state <= ShowField13;
+              state <= NextCommand;
             end if;	
 				
           -- Field 13 
