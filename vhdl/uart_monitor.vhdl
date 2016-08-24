@@ -1416,7 +1416,7 @@ begin
           when ShowField12 => 
             if history_buffer(143 downto 136)/=sentField12 then --if it has change, send serial
               sentField12<=history_buffer(143 downto 136); --remember new data
-              print_field("011100" & history_buffer(143 downto 142) & "11" & history_buffer(141 downto 136),ShowField13);
+              print_field("011100" & history_buffer(143 downto 142) & "11" & history_buffer(141 downto 136),NextCommand);
             else -- otherwise skip
               state <= NextCommand;
             end if;	
