@@ -152,10 +152,10 @@ entity container is
          led : out std_logic_vector(15 downto 0);
          sw : in std_logic_vector(15 downto 0);
          btn : in std_logic_vector(4 downto 0);
-
          UART_TXD : out std_logic;
          RsRx : in std_logic;
-         
+         uart_rts : out std_logic;
+			uart_cts : in std_logic;
          sseg_ca : out std_logic_vector(7 downto 0);
          sseg_an : out std_logic_vector(7 downto 0)
          );
@@ -346,7 +346,8 @@ architecture Behavioral of container is
 
          UART_TXD : out std_logic;
          RsRx : in std_logic;
-         
+         uart_rts : out std_logic;
+			uart_cts : in std_logic;
          sseg_ca : out std_logic_vector(7 downto 0);
          sseg_an : out std_logic_vector(7 downto 0)
          );
@@ -544,7 +545,9 @@ begin
 
       UART_TXD => UART_TXD,
       RsRx => RsRx,
-         
+		uart_cts => uart_cts,
+		uart_rts => uart_rts,
+		
       sseg_ca => sseg_ca,
       sseg_an => sseg_an
       );

@@ -26,12 +26,14 @@ use work.version.all;
 
 entity uart_monitor is
   port (
-    reset : in std_logic;
+    reset : in std_logic;    
     reset_out : out std_logic := '1';
     monitor_hyper_trap : out std_logic := '1';
     clock : in std_logic;
     tx : out std_logic;
     rx : in  std_logic;
+    UART_CTS : in std_logic;
+    UART_RTS : out std_logic;
     activity : out std_logic;
 
     key_scancode : out unsigned(15 downto 0);
@@ -92,6 +94,7 @@ architecture behavioural of uart_monitor is
            DATA : in  STD_LOGIC_VECTOR (7 downto 0);
            CLK : in  STD_LOGIC;
            READY : out  STD_LOGIC;
+           UART_CTS : in STD_LOGIC;
            UART_TX : out  STD_LOGIC);
   end component;
 
@@ -148,7 +151,9 @@ architecture behavioural of uart_monitor is
   signal blink : std_logic := '1';
 
   signal trace_continuous : std_logic := '0';
-  
+  signal send_all_regs : std_logic := '0';
+  signal human_readable : std_logic := '1'; -- normal mode
+  signal testCounter : unsigned(31 downto 0) := (others => '0');
   constant crlf : string := cr & lf;
 
   constant bannerMessage : String :=
@@ -212,7 +217,7 @@ architecture behavioural of uart_monitor is
                          ReplyTimeoutError,
                          CPUTransaction1,CPUTransaction2,CPUTransaction3,
                          ParseHex,
-                         PrintHex,PrintSpaces,
+                         PrintHex,PrintField,PrintSpaces,
                          ParseFlagBreak,                         
                          Watch1,
                          SetMemory1,SetMemory2,SetMemory3,SetMemory4,SetMemory5,
@@ -237,11 +242,17 @@ architecture behavioural of uart_monitor is
                          ShowRegisters25,ShowRegisters26,ShowRegisters27,ShowRegisters28,
                          ShowRegisters29,ShowRegisters30,ShowRegisters31,ShowRegisters32,
                          ShowRegisters33,
+                         ShowField0,ShowField1,ShowField2,ShowField3,ShowField4,ShowField5,
+                         ShowField6,ShowField7,ShowField8,ShowField9,ShowField10,ShowField11,
+                         ShowField12,ShowField13,ShowField14,ShowField15,ShowField16,ShowField17,
+                         ShowField18,ShowField19,ShowField20,ShowField21,ShowField22,ShowField23,
+                         ShowField24,ShowField25,ShowField26,ShowField27,ShowField28,ShowField29,
+                         ShowField30,ShowField31,
                          ShowP1,ShowP2,ShowP3,ShowP4,ShowP5,ShowP6,ShowP7,ShowP8,
                          ShowP9,ShowP10,ShowP11,ShowP12,ShowP13a,
                          ShowP13,ShowP14,ShowP15,ShowP16,ShowP17,
                          ShowP18,ShowP19,ShowP20,
-                         TraceStep,CPUBreak1,WaitOneCycle
+                         TraceStep,CPUBreak1,WaitOneCycle,TestSerial1,TestSerial2,TestSerial3,TestSerial4,TestSerial5
                          );
 
   subtype command_len_t is integer range 0 to 64;
@@ -301,6 +312,26 @@ architecture behavioural of uart_monitor is
   signal cpu_state_was_hold : std_logic := '0';
 
   signal show_register_delay : integer range 0 to 255;
+
+  -- Remember previous sent serial data:
+  signal sentField0 : unsigned(7 downto 0);
+  signal sentField1 : unsigned(7 downto 0);
+  signal sentField2 : unsigned(7 downto 0);
+  signal sentField3 : unsigned(7 downto 0);
+  signal sentField4 : unsigned(7 downto 0);
+  signal sentField5 : unsigned(7 downto 0);
+  signal sentField6 : unsigned(7 downto 0);
+  signal sentField7 : unsigned(7 downto 0);
+  signal sentField8 : unsigned(7 downto 0);
+  signal sentField9 : unsigned(7 downto 0);
+  signal sentField10 : unsigned(7 downto 0);
+  signal sentField11 : unsigned(7 downto 0);
+  signal sentField12 : unsigned(7 downto 0);
+  signal sentField13 : unsigned(7 downto 0);
+  signal sentField14 : unsigned(7 downto 0);
+  signal sentField15 : unsigned(7 downto 0);
+  signal sentField16 : unsigned(7 downto 0);
+
   
 begin
 
@@ -310,7 +341,9 @@ begin
       clk     => clock,
       data    => tx_data,
       ready   => tx_ready,
-      uart_tx => tx);
+      uart_tx => tx,
+      UART_CTS => UART_CTS);
+
 
   uart_rx0: uart_rx 
     Port map ( clk => clock,
@@ -484,6 +517,20 @@ begin
       success_state <= next_state;
       state <= PrintHex;
     end print_hex;
+
+
+    --Purpose output a field (two charcters)
+    procedure print_field(
+      value : in unsigned(15 downto 0);
+      next_state : in monitor_state) is
+    begin
+      hex_value <= value & x"0000";
+      hex_digits_read <= 2;
+      hex_digits_output <= 0;
+      success_state <= next_state;
+      state <= PrintField;
+    end print_field;
+
     
     procedure print_spaces (
       digits     : in integer;
@@ -637,6 +684,7 @@ begin
     -- ----------------------------------------------------
     
   begin  -- process testclock
+    UART_RTS <= '0'; --for now always ready to accept input, not sure how to properly implement this.
     if rising_edge(clock) then
       if reset='0' then
         state <= Reseting;
@@ -649,13 +697,7 @@ begin
           reset_timeout <= reset_timeout - 1;
         end if;
       else
-        if reset_timeout = 0 then
-          reset_out <= '1';
-        else
-          reset_out <= '0';
-          reset_timeout <= reset_timeout - 1;
-        end if;        
-        
+
         -- Allow a hardware switch to force stopping of the CPU
         if force_single_step='1' then
           monitor_mem_trace_mode<='1';
@@ -892,18 +934,12 @@ begin
                   parse_hex(FillMemory1);
                 elsif cmdbuffer(1) = 'g' or cmdbuffer(1) = 'G' then
                   parse_position <= 2;
-                  parse_hex(SetPC1);
-                elsif cmdbuffer(1) = '#' then
-                  -- #0 - Trigger hypervisor trap
-                  -- #1 - Release hypervisor trap
-                  if cmdbuffer(2)='1' then
-                    monitor_hyper_trap <= '1';
-                  else
-                    monitor_hyper_trap <= '0';
-                  end if;
-                  state <= NextCommand;
+                  parse_hex(SetPC1);                  
                 elsif cmdbuffer(1) = 'r' or cmdbuffer(1) = 'R' then
-                  state <= ShowRegisters;                
+		              send_all_regs <= '1'; 
+                  state <= ShowRegisters; 
+                elsif cmdbuffer(1) = 'v' or cmdbuffer(1) = 'V' then                  
+                  state <= TestSerial1;                   
                 elsif cmdbuffer(1) = 't' or cmdbuffer(1) = 'T' then
                   if cmdbuffer(2)='2' then
                     monitor_mem_stage_trace_mode<='1';
@@ -913,6 +949,17 @@ begin
                   elsif cmdbuffer(2)='c' then
                     monitor_mem_trace_mode<='1';
                     trace_continuous <= '1';
+                    state <= NextCommand;
+                  elsif cmdbuffer(2)='a' then --Trace step and send ALL registers, non-human readable
+                    human_readable<='0';
+                    send_all_regs<='1'; 
+                    state <= NextCommand;
+                  elsif cmdbuffer(2)='r' then --set human readable
+                    human_readable<='1'; 
+                    state <= NextCommand;
+                  elsif cmdbuffer(2)='d' then --set non-human readable mode
+                    human_readable<='0';
+                    send_all_regs<='0'; 
                     state <= NextCommand;
                   elsif cmdbuffer(2)='0' then
                     -- Set CPU free running
@@ -1143,6 +1190,18 @@ begin
               end if;
               
             when ParseHex => parse_hex_digit;
+
+          --Prints two characters to the serial port. 
+          when PrintField =>
+            if hex_digits_output<hex_digits_read then
+              if tx_ready='1' then
+                try_output_char(character'val(to_integer(hex_value(31 downto 24))),PrintField);
+                hex_digits_output <= hex_digits_output + 1;
+                hex_value <= hex_value(23 downto 16) & x"000000";
+              end if;
+            else
+              state <= success_state;
+            end if;
                              
             when PrintHex =>
               if hex_digits_output<hex_digits_read then
@@ -1264,9 +1323,173 @@ begin
               history_buffer(175 downto 168) <= monitor_instruction;
               history_buffer(176) <= monitor_ibytes(0);
               
-              banner_position <= 1; state<= ShowRegisters1;
+              banner_position <= 1;
+              if human_readable='0' then
+                state<=ShowField0;
+              else 
+                state<=ShowRegisters1;
+              end if;           
               monitor_mem_setpc <= '0';
-              
+
+          -- Field 0 -- PC(15 downto 8)
+          when ShowField0 => 
+            if (history_buffer(55 downto 48)/=sentField0) or send_all_regs='1' then --if it has change, send serial
+              sentField0<=history_buffer(55 downto 48); --remember new data
+              print_field("010000" & history_buffer(55 downto 54) & "11" & history_buffer(53 downto 48),ShowField1);
+            else -- otherwise skip
+              state <= ShowField1;
+            end if;			
+			
+          -- Field 1 -- PC(7 downto 0) 						
+          when ShowField1 => 
+            if (history_buffer(47 downto 40)/=sentField1) or send_all_regs='1' then 
+              sentField1<=history_buffer(47 downto 40);
+              print_field("010001" & history_buffer(47 downto 46) & "11" & history_buffer(45 downto 40),ShowField2);
+            else -- otherwise skip
+              state <= ShowField2;
+          end if;
+			
+          -- Field 2 -- Accumulator (A Register)
+          when ShowField2 => 
+            if (history_buffer(15 downto 8)/=sentField2) or send_all_regs='1' then 
+              sentField2<=history_buffer(15 downto 8); 
+              print_field("010010" & history_buffer(15 downto 14) & "11" & history_buffer(13 downto 8),ShowField3);
+            else -- otherwise skip
+              state <= ShowField3;
+            end if;
+				
+          -- Field 3 -- X Register
+          when ShowField3 => 
+            if (history_buffer(23 downto 16)/=sentField3) or send_all_regs='1' then --if it has change, send serial
+              sentField3<=history_buffer(23 downto 16); --remember new data
+              print_field("010011" & history_buffer(23 downto 22) & "11" & history_buffer(21 downto 16),ShowField4);
+            else -- otherwise skip
+              state <= ShowField4;
+            end if;	
+				
+          -- Field 4 -- Y Register
+          when ShowField4 => 
+            if (history_buffer(31 downto 24)/=sentField4) or send_all_regs='1' then --if it has change, send serial
+              sentField4<=history_buffer(31 downto 24); --remember new data
+              print_field("010100" & history_buffer(31 downto 30) & "11" & history_buffer(29 downto 24),ShowField5);
+            else -- otherwise skip
+              state <= ShowField5;
+            end if;	
+				
+          -- Field 5 -- Z Register
+          when ShowField5 => 
+            if (history_buffer(39 downto 32)/=sentField5) or send_all_regs='1' then --if it has change, send serial
+              sentField5<=history_buffer(39 downto 32); --remember new data
+              print_field("010101" & history_buffer(39 downto 38) & "11" & history_buffer(37 downto 32),ShowField6);
+            else -- otherwise skip
+              state <= ShowField6;
+            end if;	
+				
+          -- Field 6 -- B Register
+          when ShowField6 => 
+            if (history_buffer(87 downto 80)/=sentField6) or send_all_regs='1' then --if it has change, send serial
+              sentField6<=history_buffer(87 downto 80); --remember new data
+              print_field("010110" & history_buffer(87 downto 86) & "11" & history_buffer(85 downto 80),ShowField7);
+            else -- otherwise skip
+              state <= ShowField7;
+            end if;	
+
+          -- Field 7 -- SP(15 downto 8) Register
+          when ShowField7 => 
+            if (history_buffer(104 downto 97)/=sentField7) or send_all_regs='1' then --if it has change, send serial
+              sentField7<=history_buffer(104 downto 97); --remember new data
+              print_field("010111" & history_buffer(104 downto 103) & "11" & history_buffer(102 downto 97),ShowField8);
+            else -- skip otherwise
+              state <= ShowField8;
+            end if;
+
+          -- Field 8 
+          when ShowField8 => 
+            if (history_buffer(96 downto 89)/=sentField8) or send_all_regs='1' then --if it has change, send serial
+              sentField8<=history_buffer(96 downto 89); --remember new data
+              print_field("011000" & history_buffer(96 downto 95) & "11" & history_buffer(94 downto 89),ShowField9);
+            else -- otherwise skip
+              state <= ShowField9;
+            end if;
+				
+          -- Field 9 
+          when ShowField9 => 
+            if (history_buffer(112 downto 105)/=sentField9) or send_all_regs='1' then --if it has change, send serial
+              sentField9<=history_buffer(112 downto 105); --remember new data
+              print_field("011001" & history_buffer(112 downto 111) & "11" & history_buffer(110 downto 105),ShowField10);
+            else -- otherwise skip
+              state <= ShowField10;
+            end if;
+				
+          -- Field 10 
+          when ShowField10 => 
+          if (history_buffer(120 downto 113)/=sentField10) or send_all_regs='1' then --if it has change, send serial
+            sentField10<=history_buffer(120 downto 113); --remember new data
+            print_field("011010" & history_buffer(120 downto 119) & "11" & history_buffer(118 downto 113),ShowField11);
+          else -- otherwise skip
+            state <= ShowField11;
+          end if;
+				
+          -- Field 11
+          when ShowField11 => 
+          if (history_buffer(135 downto 128)/=sentField11) or send_all_regs='1' then --if it has change, send serial
+            sentField11<=history_buffer(135 downto 128); --remember new data
+            print_field("011011" & history_buffer(135 downto 134) & "11" & history_buffer(133 downto 128),ShowField12);
+          else -- otherwise skip
+            state <= ShowField12;
+          end if;	
+				
+          -- Field 12 
+          when ShowField12 => 
+            if (history_buffer(143 downto 136)/=sentField12) or send_all_regs='1' then --if it has change, send serial
+              sentField12<=history_buffer(143 downto 136); --remember new data
+              print_field("011100" & history_buffer(143 downto 142) & "11" & history_buffer(141 downto 136),NextCommand);
+	      --send_all_regs <='0';
+            else -- otherwise skip
+              send_all_regs <='0';
+              state <= NextCommand;
+            end if;	
+				
+          --- Field 13->16 not currently used. 
+
+          -- Field 13 
+          when ShowField13 => 
+            if (history_buffer(151 downto 144)/=sentField13) or send_all_regs='1' then --if it has change, send serial
+              sentField13<=history_buffer(151 downto 144); --remember new data
+              print_field("011101" & history_buffer(151 downto 150) & "11" & history_buffer(149 downto 144),ShowField14);
+            else -- otherwise skip
+              state <= ShowField14;
+            end if;		
+
+
+          -- Field 14 
+          when ShowField14 => 
+            if (history_buffer(159 downto 152)/=sentField14) or send_all_regs='1' then --if it has change, send serial
+              sentField14<=history_buffer(159 downto 152); --remember new data
+              print_field("011110" & history_buffer(159 downto 158) & "11" & history_buffer(157 downto 152),ShowField15);
+            else -- otherwise skip
+              state <= ShowField15;
+            end if;		
+				
+          -- Field 15 
+          when ShowField15 => 
+            if (history_buffer(167 downto 160)/=sentField15) or send_all_regs='1' then --if it has change, send serial
+              sentField15<=history_buffer(167 downto 160); --remember new data
+              print_field("011111" & history_buffer(167 downto 166) & "11" & history_buffer(165 downto 160),ShowField16);
+            else -- otherwise skip
+              state <= ShowField16;
+            end if;		
+				
+          -- Field 16 
+          when ShowField16 => 
+            if (history_buffer(104 downto 97)/=sentField16) or send_all_regs='1' then --if it has change, send serial            
+              sentField16<=history_buffer(7 downto 0); --remember new data
+              print_field("100000" & history_buffer(7 downto 6) & "11" & history_buffer(5 downto 0),NextCommand);              
+            else -- otherwise skip
+              state <= NextCommand; 
+            end if;		
+
+
             when ShowRegisters1 =>
               if tx_ready='1' then
                 tx_data <= to_std_logic_vector(registerMessage(banner_position));
@@ -1536,7 +1759,34 @@ begin
               state <= WaitOneCycle;
               
             when WaitOneCycle => state <= post_transaction_state;
-                                 
+
+
+
+            --Serial write test, prints 0->FFFFFFF0, one per line as fast as possible
+            when TestSerial1 =>
+            if testCounter < x"FFFFFFF0" then
+              testCounter<= testCounter+1;                      
+              print_hex(testCounter, 8, TestSerial2);
+            else state<=NextCommand;
+            end if;
+
+            when TestSerial2 =>
+            try_output_char(cr,TestSerial3);
+            
+            when TestSerial3 =>
+            try_output_char(lf,TestSerial4);
+
+            when TestSerial4 =>
+            show_register_delay <= 255;
+            state<=TestSerial5;
+
+            when TestSerial5 =>
+              if show_register_delay=0 then
+                state <= TestSerial1;
+              else
+                show_register_delay <= show_register_delay - 1;
+              end if;
+
             when others => null;
                            
           end case;   -- case state is

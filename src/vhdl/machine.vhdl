@@ -171,7 +171,9 @@ entity machine is
 
          UART_TXD : out std_logic;
          RsRx : in std_logic;
-         
+         uart_cts : in std_logic :='1';
+         uart_rts : out std_logic :='1';
+
          sseg_ca : out std_logic_vector(7 downto 0);
          sseg_an : out std_logic_vector(7 downto 0)
          );
@@ -187,6 +189,8 @@ architecture Behavioral of machine is
     clock : in std_logic;
     tx : out std_logic;
     rx : in  std_logic;
+    UART_CTS : in std_logic;
+    UART_RTS : out std_logic;
     activity : out std_logic;
     
     key_scancode : out unsigned(15 downto 0);
@@ -1163,7 +1167,8 @@ begin
     clock => uartclock,
     tx       => UART_TXD,
     rx       => RsRx,
-
+    UART_RTS => uart_rts,
+    UART_CTS => uart_cts,
     force_single_step => sw(11),
     
     fastio_read => fastio_read,

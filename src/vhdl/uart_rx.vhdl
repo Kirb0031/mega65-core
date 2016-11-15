@@ -17,7 +17,10 @@ architecture behavioural of uart_rx is
 -- 96MHz/230400 -1 = 420 clock ticks per bit
 -- constant bit_rate_divisor : unsigned(13 downto 0) := "00000110011110";
 -- 48MHz/230400 -1 = 210 clock ticks per bit
-constant bit_rate_divisor : unsigned(13 downto 0) := "00000011010010";
+-- 48MHz/961200 -1 = 52
+-- 48MHz/1843200 -1 = 26ish
+--48MHz/3M = 15
+constant bit_rate_divisor : unsigned(13 downto 0) := "00000000001111";
 -- 32MHz/230400 -1 = 138 clock ticks per bit
 --constant bit_rate_divisor : unsigned(13 downto 0) := "00000010001010";
 -- 24MHz/230400 -1 = 105 clock ticks per bit
@@ -31,7 +34,7 @@ signal rx_data : std_logic_vector(9 downto 0);
 
 type uart_rx_state is (Idle,WaitingForMidBit,WaitingForNextBit,WaitForRise);
 signal rx_state : uart_rx_state := Idle;
-signal uart_rx_debounced : std_logic_vector(7 downto 0) := (others =>'1');
+signal uart_rx_debounced : std_logic_vector(3 downto 0) := (others =>'1');
 
 type uart_buffer is array (0 to 63) of std_logic_vector(7 downto 0);
 
@@ -41,7 +44,7 @@ begin  -- behavioural
     -- purpose: based on last 8 samples of uart_rx, decide if the average signal is a 1 or a 0
   begin
     if rising_edge(CLK) then
-      uart_rx_debounced <= uart_rx_debounced(6 downto 0) & uart_rx;
+      uart_rx_debounced <= uart_rx_debounced(2 downto 0) & uart_rx;
       
       -- Update bit clock
       if bit_timer<bit_rate_divisor then
@@ -51,7 +54,7 @@ begin  -- behavioural
       end if;
       -- Look for start of first bit
       -- XXX Should debounce this!
-      if rx_state = Idle and UART_RX_debounced = x"00" then
+      if rx_state = Idle and UART_RX_debounced = x"0" then
         report "start receiving byte" severity note;
         -- Start receiving next byte
         bit_timer <= (others => '0');
