@@ -11,7 +11,7 @@ entity keymapper is
 
     cpu_hypervisor_mode : in std_logic;
     drive_led_out : in std_logic;
-
+    disableKeyboard : in std_logic;
     last_scan_code : out std_logic_vector(12 downto 0);
 
     nmi : out std_logic := 'Z';
@@ -388,6 +388,7 @@ begin  -- behavioural
                          last_scan_code(11 downto 9) <= std_logic_vector(leftorupcount(2 downto 0));
                          last_scan_code(8 downto 0) <= full_scan_code(8 downto 0);
 
+						if disableKeyboard='0' then -- If keyboard is disabled in matrix mode, dont update matrix.
                          case full_scan_code is
                            when x"17D" =>
                               -- Restore key shall do NMI as expected, but also
@@ -503,7 +504,7 @@ begin  -- behavioural
                                           
                            when others => null;
                          end case;
-                         
+                        end if;
                        end if;
                                               
           when ParityBit =>  ps2state <= Idle;  -- was StopBit.  See if
