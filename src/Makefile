@@ -45,6 +45,7 @@ fpga:
 
 generated_vhdl:	$(VHDLSRCDIR)/kickstart.vhdl \
 		$(VHDLSRCDIR)/charrom.vhdl \
+		$(VHDLSRCDIR)/uart_charrom.vhd \
 		$(VHDLSRCDIR)/version.vhdl
 
 
@@ -293,6 +294,16 @@ $(VHDLSRCDIR)/charrom.vhdl:	tools/pngprepare/pngprepare 8x8font.png
 #       exe          option  infile      outfile
 	tools/pngprepare/pngprepare charrom 8x8font.png $(VHDLSRCDIR)/charrom.vhdl
 
+
+# 'uart_charrom' is used to put the pngprepare file into a special mode that
+# generates the uart_charrom.vhd file that is embedded with the contents of the fullascii8x8font.png file
+$(VHDLSRCDIR)/uart_charrom.vhd:	tools/pngprepare/pngprepare fullascii8x8font.png
+	$(warning =============================================================)
+	$(warning ~~~~~~~~~~~~~~~~> Making: $(VHDLSRCDIR)/uart_charrom.vhd)
+#       exe          option  infile      outfile
+	tools/pngprepare/pngprepare uart_charrom fullascii8x8font.png $(VHDLSRCDIR)/uart_charrom.vhd
+
+
 # ============================ done moved, Makefile-dep, print-warn, clean-target
 # i think the 'logo' is used to put the pngprepare into a special mode that
 # generates the BOOTLOGO.M65 file that is embedded with the contents of the mega65*.png file
@@ -433,6 +444,7 @@ clean:
 	rm -f tests/test_fdc_equal_flag.prg tests/test_fdc_equal_flag.list tests/test_fdc_equal_flag.map
 	rm -rf $(SDCARD_DIR)
 	rm -f $(VHDLSRCDIR)/kickstart.vhdl $(VHDLSRCDIR)/charrom.vhdl $(VHDLSRCDIR)/version.vhdl version.a65
+	rm -f $(VHDLSRCDIR)/uart_charrom.vhd
 	rm -f monitor_drive monitor_load read_mem ghdl-frame-gen chargen_debug dis4510 em4510 4510tables
 	rm -f c65-rom-911001.txt c65-911001-rom-annotations.txt c65-dos-context.bin c65-911001-dos-context.bin
 	rm -f thumbnail.prg

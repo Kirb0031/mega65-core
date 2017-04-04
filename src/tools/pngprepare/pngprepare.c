@@ -74,6 +74,57 @@ char *vhdl_suffix=
   "\n"
   "end Behavioral;\n";
 
+/* ============================================================= */  
+
+//For mode 3  
+  
+ char *vhdl_uart_prefix=
+  "library IEEE;\n"
+  "use IEEE.STD_LOGIC_1164.ALL;\n"
+  "use ieee.numeric_std.all;\n"
+  "use work.debugtools.all;\n"
+  "\n"
+  "--\n"
+  "entity uart_charrom is\n"
+  "port (clkl : in std_logic;\n"  
+  "      wel : IN STD_LOGIC_VECTOR(0 DOWNTO 0);\n"
+  "      addrl : IN STD_LOGIC_VECTOR(11 DOWNTO 0);\n"
+  "      dinl : IN STD_LOGIC_VECTOR(7 DOWNTO 0);\n"
+  "      clkr : IN STD_LOGIC;\n"
+  "      addrr : IN STD_LOGIC_VECTOR(11 DOWNTO 0);\n"
+  "      doutr : OUT STD_LOGIC_VECTOR(7 DOWNTO 0)\n"
+  "     );\n"
+  "end uart_charrom;\n"
+  "\n"
+  "architecture Behavioral of uart_charrom is\n"
+  "\n"
+  "-- 4K x 8bit pre-initialised RAM for character ROM\n"
+  "\n"
+  "type ram_t is array (0 to 4095) of std_logic_vector(7 downto 0);\n"
+  "signal ram : ram_t := (\n"
+  "\n";
+
+char *vhdl_uart_suffix=
+  ");\n"
+  "\n"
+  "begin\n"
+  "\n"
+  "--process for read and write operation.\n"  
+  "process(clkl)\n"
+  "  variable theram : ram_t;\n"
+  "begin\n"
+  "  if(rising_edge(Clkl)) then \n"
+  "    if wel(0)='1' then\n"
+  "      ram(to_integer(unsigned(addrl))) <= dinl;\n"
+  "    end if;\n"
+  "    doutr <= ram(to_integer(unsigned(addrr)));\n"
+  "  end if;\n"
+  "end process;\n"  
+  "\n"
+  "end Behavioral;\n";
+
+
+  
 /* ============================================================= */
 
 int x, y;
@@ -389,6 +440,75 @@ void process_file(int mode, char *outputfilename)
     printf("%d unique tiles\n",tile_count);
   }
 
+
+
+  /* ============================ */
+  
+  //Prints out a character rom, similarly as mode 1, but has different prefix/suffix 
+  
+  if (mode==3) {
+    printf("mode=3 (uart_charrom)\n");
+    // charrom mode
+
+    int bytes=0;
+    fprintf(outfile,"%s",vhdl_uart_prefix);
+    if (width!=8) {
+      fprintf(stderr,"Fonts must be 8 pixels wide\n");
+    }
+
+    int spots[8][8];
+
+    for (y=0; y<height; y++) {
+      png_byte* row = row_pointers[y];
+      int byte=0;
+      int yy=y&7;
+
+      for (x=0; x<width; x++) {
+	png_byte* ptr = &(row[x*multiplier]);
+	int r=ptr[0]; // g=ptr[1],b=ptr[2], a=ptr[3];
+
+	if (x<8) {
+	  if (r>0x7f) {
+	    byte|=(1<<(7-x));
+	    spots[yy][x]=1;
+	  } else spots[yy][x]=0;
+	}
+      }
+      fflush(stdout);
+      char comma = ',';
+      if (y==height-1) comma=' ';
+      fprintf(outfile,"x\"%02x\"%c",byte,comma);
+      bytes++;
+      if ((y&7)==7) {
+	fprintf(outfile,"\n");
+	int yy;
+	for(yy=0;yy<8;yy++) {
+	  fprintf(outfile,"-- [");
+	  for(x=0;x<8;x++) {
+	    if (spots[yy][x]) fprintf(outfile,"*"); else fprintf(outfile," ");
+	  }
+	  fprintf(outfile,"]\n");
+	}
+      }
+    }
+    // Fill in any missing bytes
+    if (bytes<4096) {
+
+      printf("Padding output file to 4096\n");
+
+      fprintf(outfile,",\n");
+      for(;bytes<4096;bytes+=8) {
+	fprintf(outfile,"x\"00\",x\"00\",x\"00\",x\"00\",x\"00\",x\"00\",x\"00\",x\"00\"%c\n",
+		bytes<(4096-8)?',':' ');
+      }
+    }
+    fprintf(outfile,"%s",vhdl_uart_suffix);
+
+    if (outfile != NULL) {
+      fclose(outfile);
+      outfile = NULL;
+    }
+  }
 }
 
 /* ============================================================= */
@@ -405,6 +525,7 @@ int main(int argc, char **argv)
   if (!strcasecmp("logo",argv[1])) mode=0;
   if (!strcasecmp("charrom",argv[1])) mode=1;
   if (!strcasecmp("hires",argv[1])) mode=2;
+  if (!strcasecmp("uart_charrom",argv[1])) mode=3;
   if (mode==-1) {
     fprintf(stderr,"Usage: program_name <logo|charrom> <file_in> <file_out>\n");
     exit(-1);
