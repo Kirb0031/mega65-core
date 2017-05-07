@@ -53,6 +53,13 @@
 	.space d81_clustersneeded 2
 	.space d81_clustercount 2
 
+	; variables for task switching
+	; CE0F -14
+	.space ts_current_sector_byte 4
+	.space ts_dmalist 10
+        .space delayCounter 1
+        .space ts_sector_counter 2
+
 	; make sure that we don't go past the 256 byte page reserved for hypervisor scratch space
 	;
 	.checkpc $CEFF

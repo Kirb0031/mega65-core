@@ -280,6 +280,7 @@ architecture Behavioral of machine is
 
   component gs4510
     port (
+	   sector_offset_in : in unsigned(9 downto 0);
 	   protected_hardware : out unsigned(7 downto 0);
       Clock : in std_logic;
       ioclock : in std_logic;
@@ -483,7 +484,8 @@ architecture Behavioral of machine is
   end component;
   
   component iomapper is
-    port (Clk : in std_logic;
+    port (sector_offset_out : out unsigned(9 downto 0);
+	       Clk : in std_logic;
 	       protected_hardware_in : in unsigned(7 downto 0);
           cpuclock : in std_logic;
           pixelclk : in std_logic;
@@ -752,7 +754,7 @@ architecture Behavioral of machine is
   signal uart_tx_buffer : std_logic; 
   signal uart_rx_buffer : std_logic;
   signal protected_hardware_sig : unsigned(7 downto 0);
-
+  signal sector_offset : unsigned(9 downto 0);
   -- Matrix Mode signals
   signal scancode_out : std_logic_vector(12 downto 0); 
   signal mm_displayMode : std_logic_vector(1 downto 0):=b"10"; 
@@ -940,6 +942,7 @@ begin
   end process;
   
   cpu0: gs4510 port map(
+    sector_offset_in => sector_offset,
     matrix_trap_in=>matrix_trap,
     protected_hardware => protected_hardware_sig,
     clock => cpuclock,
@@ -1119,6 +1122,7 @@ begin
       );
   
   iomapper0: iomapper port map (
+    sector_offset_out => sector_offset,
     clk => ioclock,
 	 protected_hardware_in => protected_hardware_sig, 
     hyper_trap => hyper_trap,

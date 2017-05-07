@@ -150,15 +150,15 @@ double_restore_trap:
 
 	; enable 48MHz for fast mode instead of 3.5MHz
 	;
-	lda $D054
-	eor #$40
-	sta $D054
+	;lda $D054
+	;eor #$40
+	;sta $D054
 
 	; enable FAST mode,
 	;
-	lda $D031
-	ora #$40
-	sta $D031
+	;lda $D031
+	;ora #$40
+	;sta $D031
 
 	; bump border colour so that we know something has happened
 	;
@@ -166,23 +166,29 @@ double_restore_trap:
 	inc
 	and #$0f
 	sta $D020
+	jsr sd_unmap_sectorbuffer ;so we can write to cia regs. 
 
-	; return from hypervisor
-	;
+	jsr ts_read_from_sd        
+	;give us something to break on
+        nop
+	nop
+	
+
+	; return from hypervisor        
 	sta hypervisor_enterexit_trigger
 
 ;	========================
 
 protected_hardware_config:
 
-        ; store config info passed from register a 
-        lda hypervisor_a
+	; store config info passed from register a 
+	lda hypervisor_a
 	sta $D672
 
 	; bump border colour so that we know something has happened
 	;
 
-        lda $D020
+	lda $D020
 	inc 
 	and #$0f
 	sta $D020
@@ -193,27 +199,563 @@ protected_hardware_config:
 
 matrix_mode_toggle:
 
-	lda $D672
-	; We want to toggle bit 6 only.
-	and #$40 ; mask bit 6
-	bne clearmm ;if its not zero
+
+;Originally used to toggle Matrix Mode
+;Repurposed as 'save state' button for now. 
+
+;	lda $D672
+;	; We want to toggle bit 6 only.
+;	and #$40 ; mask bit 6
+;	bne clearmm ;if its not zero
 	
-	;If its not enabled, we want to set bit 6
-	lda $D672
-        ora #$40 
-	jmp exitmm
-       ;If its enabled, we want to clear bit 6
-clearmm:
-        lda $D672
-        and #$BF
-exitmm:
-        sta $D672
+;	;If its not enabled, we want to set bit 6
+;	lda $D672
+;       ora #$40 
+;	jmp exitmm
+;       ;If its enabled, we want to clear bit 6
+;clearmm:
+;        lda $D672
+;        and #$BF
+;exitmm:
+;        sta $D672
+    
+; bump border colour so that we know something has happened	
+  lda $D020
+  inc 
+  and #$0f
+  sta $D020
 
-        ;;;Dont need this any more
-	;; bump border colour so that we know something has happened	
-        ;lda $D020
-	;inc 
-	;and #$0f
-	;sta $D020
+  jsr sd_unmap_sectorbuffer
+  jsr ts_write_to_sd
+ 
+  sta hypervisor_enterexit_trigger
+	
+; ========================
 
-	sta hypervisor_enterexit_trigger
+;Writes the next sector to SD card. 
+
+write_next_to_sd:
+
+
+; bump border colour
+ lda $D020
+ inc 
+ and #$0f
+ sta $D020
+
+; enable enhanced registers, idk if this is needed? 
+ lda #$47
+ sta $d02f
+ lda #$53
+ sta $d02f
+
+; Next Sector
+ jsr next_sector
+ jsr set_sector
+; Next Address
+ jsr inc_address_write
+
+; Start DMA transfer
+ jsr ts_initiate_dma
+
+; Start SD card transfer
+ jsr write_to_buffer
+
+; Increment the sector counter 
+ jsr inc_sector_counter
+
+rts
+
+; ======================
+
+read_next_from_sd:
+; bump border colour
+ lda $D020
+ inc 
+ and #$0f
+ sta $D020
+
+; Next Sector
+ jsr next_sector
+ jsr set_sector
+
+; Next Address
+ jsr inc_address_read
+ jsr inc_sector_counter
+
+; Start SD card transfer
+ jsr read_from_buffer
+
+; Start DMA transfer
+ jsr ts_initiate_dma
+
+rts
+
+
+; ======================
+
+ts_read_from_sd:
+
+; zero sector counter
+jsr reset_sector_counter
+
+; reset SD card
+jsr sdreset
+jsr sd_unmap_sectorbuffer
+
+; set inital DMA values
+jsr ts_setup_read_address ; initalises DMA list for reading
+
+; read from SD card sector (write into the buffer)
+jsr read_from_buffer
+
+; start DMA transfer from buffer
+ jsr ts_initiate_dma
+
+; increment the sector counter
+ jsr inc_sector_counter
+
+tsr_loop:
+; if upper byte of sector counter is zero
+; check the lower byte of sector counter for sector 102 (103 skip) to skip
+lda ts_sector_counter+1
+and #$01
+beq checkLowerSector
+
+
+tsr_cont:
+
+jsr read_next_from_sd
+lda ts_sector_counter+1
+;RAM+ROM = ?262143? = 512 sectors
+and #$08;#$08; ;stop @ sector ~400 768 512-1 
+;and #$04;#$08; ;stop @ sector ~400 768 512-1 
+;Maybe use CMP to check some stuff
+;End at 7F40000, so 26144/512=512 sectors
+;cmp #$
+bne retr
+jmp tsr_loop
+
+;stop on exit
+pause_loop:
+jmp pause_loop;
+
+retr:
+jsr reset_sector_counter
+rts
+
+checkLowerSector:
+lda ts_sector_counter 
+cmp #$67 ;Sector 102 (103) 
+beq tsr_skip ;on zero go to skip
+jmp tsr_cont; 
+
+tsr_skip:
+;Skips a single sector
+;increment sector, adress, etc. 
+ jsr next_sector
+ jsr set_sector
+ jsr inc_address_read
+ jsr inc_sector_counter
+;jmp pause_loop
+jmp tsr_cont;
+
+
+
+; ======================
+
+ts_write_to_sd:
+jsr reset_sector_counter
+jsr sdreset
+jsr sd_unmap_sectorbuffer
+jsr ts_setup_write_address ; initalise DMA list for writing 
+jsr ts_initiate_dma ; initiate the DMA transfer
+jsr write_to_buffer ; initiate write to sd
+jsr inc_sector_counter
+
+;write loop
+tsw_loop:
+jsr write_next_to_sd
+lda ts_sector_counter+1
+and #$08
+bne retw ;branch if upper byte of counter reaches 8 (0000 1000 0000 0000 is 2048) or maybe OBO error? 
+jmp tsw_loop
+
+retw:
+jsr reset_sector_counter
+rts 
+
+; =====================
+
+init:
+jsr reset_sector_counter
+jsr sdreset
+jsr sd_unmap_sectorbuffer
+jsr ts_store_dmalist_init;
+rts
+
+; ===================
+inc_sector_counter:
+
+lda ts_sector_counter
+clc      ;clear carry 
+adc #$01 ;add one to counter low byte
+sta ts_sector_counter
+
+lda ts_sector_counter+1
+adc #$00 ;add the carry to low byte
+sta ts_sector_counter+1
+
+rts
+; ==================
+
+reset_sector_counter:
+lda #$00
+sta ts_sector_counter
+sta ts_sector_counter+1
+rts
+
+;====================
+
+wait_for_ready:
+  lda $d680
+  and #$01 ;Bit test bit 0
+  bne wait_for_ready;
+rts
+
+; ======================
+
+next_sector: 
+;increment current sector bytes by 512:
+
+lda ts_current_sector_byte+1
+clc
+adc #$02
+sta ts_current_sector_byte+1
+
+lda ts_current_sector_byte+2
+adc #$00
+sta ts_current_sector_byte+2
+
+lda ts_current_sector_byte+3
+adc #$00
+sta ts_current_sector_byte+3
+
+rts
+
+; =========================
+
+set_sector: 
+  lda ts_current_sector_byte
+  sta sd_address_byte0 ; is $D681 --sd_sector(7 downto 0)
+  lda ts_current_sector_byte+1
+  sta sd_address_byte1 ; is $d682 --sd_sector(15 downto 8)
+  lda ts_current_sector_byte+2
+  sta sd_address_byte2 ; is $d683 --sd_sector(23 downto 16)
+  lda ts_current_sector_byte+3
+  sta sd_address_byte3 ; is $d684 --sd_sector(31 downto 24)
+  rts
+	
+; =========================
+
+ts_setup_write_address:
+
+lda #$00
+sta ts_current_sector_byte
+sta sd_address_byte0
+lda #$84
+sta ts_current_sector_byte+1
+sta sd_address_byte1
+lda #$D7
+sta ts_current_sector_byte+2
+sta sd_address_byte2
+lda #$17
+sta ts_current_sector_byte+3
+sta sd_address_byte3
+
+lda #$00 ;DMA list bank (22-16 value(6 downto 0), zeroes addr(27 downto 23)
+sta $d702
+
+; Kickstart ROM is at $FFFE000 - $FFFFFFF, so DMA list is at $FF
+lda #$00 ;DMA list MB (27-20)
+sta $d704
+
+; Copy from MB $7F (7F00000-$00001FF First 512B of RAM)
+lda #$7F
+sta $d705 ;DMA src MB
+
+; Destination MB, also $FF because enhanced io RAM space ?
+lda #$FF
+sta $d706 ;DMA dst MB
+
+; Source Address |
+lda #$00 
+sta ts_dmalist+3 ; lower byte
+lda #$00
+sta ts_dmalist+4 ; upper byte
+; Destination Bank
+lda #$00 ;  
+sta ts_dmalist+5
+
+
+; map to static SD buffer @ FFD6000-FFD61FFF so mapping of colour ram doesnt matter
+
+; Destination Address | ... to sd buffer at FF|D|3E00 ($DE00-$DFFF)
+;lda #$00 
+;sta ts_dmalist+6 ; lower byte
+;lda #$3E
+;sta ts_dmalist+7 ; upper byte
+
+; Destination Address | ... to sd buffer at FF|D|6000
+lda #$00 
+sta ts_dmalist+6 ; lower byte
+lda #$60
+sta ts_dmalist+7 ; upper byte
+
+; Destination Bank
+lda #$0D ;  
+sta ts_dmalist+8
+
+; copy + last request in chain
+lda #$00 
+sta ts_dmalist
+
+lda #$00
+sta ts_dmalist+1 ; lower byte of copy size
+lda #$02
+sta ts_dmalist+2 ; upper byte of copy size
+
+; Modulo (not used, but I think needs to be zeroed)
+lda #$00
+sta ts_dmalist+9
+lda #$00
+sta ts_dmalist+10
+
+
+rts
+
+; =======================
+
+ts_setup_read_address:
+
+lda #$00
+sta ts_current_sector_byte
+sta sd_address_byte0
+lda #$84
+sta ts_current_sector_byte+1
+sta sd_address_byte1
+lda #$D7
+sta ts_current_sector_byte+2
+sta sd_address_byte2
+lda #$17
+sta ts_current_sector_byte+3
+sta sd_address_byte3
+
+
+lda #$00 ;DMA list bank (22-16 value(6 downto 0), zeroes addr(27 downto 23)
+sta $d702
+
+; Kickstart ROM is at $FFFE000 - $FFFFFFF, so DMA list is at $FF
+lda #$00 ;DMA list MB (27-20)
+sta $d704
+
+; Source MB, also $FF because enhanced io RAM space ?
+lda #$FF
+sta $d705 ;DMA dst MB
+
+; Destination
+lda #$7F
+sta $d706 ;DMA src MB
+
+; Source Address | ... from sd buffer at FF|D|3E00 ($DE00-$DFFF)
+;lda #$00 
+;sta ts_dmalist+3 ; lower byte
+;lda #$3E
+;sta ts_dmalist+4 ; upper byte
+
+; Source Address | ... from sd buffer at FF|D|6000
+lda #$00 
+sta ts_dmalist+3 ; lower byte
+lda #$60
+sta ts_dmalist+4 ; upper byte
+
+; Destination Bank
+lda #$0D ;  
+sta ts_dmalist+5
+
+; Destination Address | ... to 7F|0|0000
+lda #$00 
+sta ts_dmalist+6 ; lower byte
+lda #$00
+sta ts_dmalist+7 ; upper byte
+; Destination Bank
+lda #$00 ;  
+sta ts_dmalist+8
+
+; copy + last reqest in chain
+lda #$00 
+sta ts_dmalist
+
+lda #$00
+sta ts_dmalist+1 ; lower byte of copy size
+lda #$02
+sta ts_dmalist+2 ; upper byte of copy size
+
+; Modulo (not used, but I think needs to be zeroed)
+lda #$00
+sta ts_dmalist+9
+lda #$00
+sta ts_dmalist+10
+
+
+rts
+
+
+; =========================
+
+
+ts_initiate_dma:
+
+lda #>ts_dmalist
+sta $d701
+; set bottom 8 bits of address and trigger DMA.
+lda #<ts_dmalist
+sta $d700
+
+rts
+
+
+; =======================
+
+write_to_buffer:
+;Assuming buffer has data to be written
+;and D681-D684 is set to correct sector
+
+lda #$03
+sta $d680
+jsr wait_for_ready
+
+rts
+
+; ========================
+
+read_from_buffer:
+
+lda #$02
+sta $d680
+jsr wait_for_ready
+rts
+
+; ========================
+
+;re-write this like the inc_address_read below. but this still works. 
+
+inc_address_write:
+; Increment Source Address, byte 1, byte 2, and bank
+; Byte 1: ts_dmalist+3 - Lower Byte
+; Byte 2: ts_dmalist+4 - Upper Byte
+; Byte 3: ts_dmalist+5 - Bank
+
+;increment byte 2
+addw_inc_b2:  
+inc ts_dmalist+4
+inc ts_dmalist+4
+beq addw_inc_b3 ;if byte2 result is zero (overflow)
+rts
+
+;increment byte 3
+addw_inc_b3:  
+inc ts_dmalist+5
+rts
+
+
+
+
+; ======================
+
+inc_address_read:
+; Increment Dest Address, byte 1, byte 2, and bank
+; Byte 1: ts_dmalist+6 - Lower Byte
+; Byte 2: ts_dmalist+7 - Upper Byte
+; Byte 3: ts_dmalist+8 - Bank
+
+lda ts_dmalist+7
+clc
+adc #$02
+sta ts_dmalist+7
+
+lda ts_dmalist+8
+adc #$00
+sta ts_dmalist+8
+
+rts
+
+; ======================
+ts_store_dmalist_init:
+;Address set to scratch space @400M 
+;Initialise SD controller sector bytes 
+
+lda #$00
+sta ts_current_sector_byte
+sta sd_address_byte0
+lda #$84
+sta ts_current_sector_byte+1
+sta sd_address_byte1
+lda #$D7
+sta ts_current_sector_byte+2
+sta sd_address_byte2
+lda #$17
+sta ts_current_sector_byte+3
+sta sd_address_byte3
+
+;Initalise DMA list 
+
+lda #$00 ;DMA list bank (22-16 value(6 downto 0), zeroes addr(27 downto 23)
+sta $d702
+
+; Kickstart ROM is at $FFFE000 - $FFFFFFF, so DMA list is at $FF
+lda #$00 ;DMA list MB (27-20)
+sta $d704
+
+; Copy from MB $7F (7F00000-$00001FF First 512B of RAM)
+lda #$7F
+sta $d705 ;DMA src MB
+
+; Destination MB, also $FF because enhanced io RAM space ?
+lda #$FF
+sta $d706 ;DMA dst MB
+
+; copy + last reqest in chain
+lda #$00 
+sta ts_dmalist
+
+lda #$00
+sta ts_dmalist+1 ; lower byte of copy size
+lda #$02
+sta ts_dmalist+2 ; upper byte of copy size
+
+; Source Address | copy from start of RAM at 7F|0|0000
+lda #$00
+sta ts_dmalist+3 ; lower byte
+lda #$00
+sta ts_dmalist+4 ; upper byte
+; Source Bank
+lda #$00
+sta ts_dmalist+5
+
+; Destination Address | ... to sd buffer at FF|D|3E00 ($DE00-$DFFF)
+lda #$00 
+sta ts_dmalist+6 ; lower byte
+lda #$3E
+sta ts_dmalist+7 ; upper byte
+; Destination Bank
+lda #$0D ;  
+sta ts_dmalist+8
+
+; Modulo (not used, but I think needs to be zeroed)
+lda #$00
+sta ts_dmalist+9
+lda #$00
+sta ts_dmalist+10
+
+rts

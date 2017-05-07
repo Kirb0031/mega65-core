@@ -50,7 +50,8 @@ use Std.TextIO.all;
 use work.debugtools.all;
 
 entity sdcardio is
-  port (
+  port (    
+    sector_offset_out : out unsigned(9 downto 0);
     clock : in std_logic;
     pixelclk : in std_logic;
     reset : in std_logic;
@@ -137,7 +138,7 @@ architecture behavioural of sdcardio is
         mosi : out std_logic;
         miso : in std_logic;
         sclk : out std_logic;
-
+		  
         sector_number : in std_logic_vector(31 downto 0);  -- sector number requested
         sdhc_mode : in std_logic;
         half_speed : in std_logic;
@@ -166,6 +167,8 @@ architecture behavioural of sdcardio is
     );
   END component;
 
+  signal stuckCounter : unsigned (2 downto 0); --3 bit stuck counter ?
+  signal hasReset : std_logic :='1';
   signal QspiSCKInternal : std_logic := '1';
   signal QspiCSnInternal : std_logic := '1'; 
   
@@ -295,14 +298,14 @@ begin  -- behavioural
 	miso => miso_i,
 	sclk => sclk_o,
 
-        sector_number => std_logic_vector(sd_sector),
-        sdhc_mode => sdhc_mode,
-        half_speed => half_speed,
+   sector_number => std_logic_vector(sd_sector),
+   sdhc_mode => sdhc_mode,
+   half_speed => half_speed,
 	rd =>  sd_doread,
 	wr =>  sd_dowrite,
 	dm_in => '1',	-- data mode, 0 = write continuously, 1 = write single block
 	reset => sd_reset,
-        data_ready => data_ready,
+   data_ready => data_ready,
 	din => std_logic_vector(sd_wdata),
 	unsigned(dout) => sd_rdata,
 	clk => clock	-- twice the SPI clk.  XXX Cannot exceed 50MHz
@@ -1045,6 +1048,7 @@ begin  -- behavioural
                 when x"00" =>
                   -- Reset SD card
                   sd_reset <= '1';
+						hasReset <= '1';
                   sd_state <= Idle;
                   sdio_error <= '0';
                   sdio_fsm_error <= '0';
@@ -1053,6 +1057,7 @@ begin  -- behavioural
                 when x"10" =>
                   -- Reset SD card with flags specified
                   sd_reset <= '1';
+						hasReset <= '1';
                   sd_state <= Idle;
                     sdio_error <= '0';
                   sdio_fsm_error <= '0';
@@ -1093,6 +1098,14 @@ begin  -- behavioural
                     sdio_fsm_error <= '0';
                   end if;
 
+                --bump out of stuck, see if this works 
+					 --Will probably break something. 
+                when x"39" => 
+                  sd_state <= Idle;
+                  sdio_error <= '0';
+                  sdio_fsm_error <= '0';
+				      sdio_busy <= '0';
+						
                 when x"40" => sdhc_mode <= '0';
                 when x"41" => sdhc_mode <= '1';
                 when x"42" => half_speed <= '0';
@@ -1237,6 +1250,7 @@ begin  -- behavioural
       case sd_state is
 
         when Idle =>
+		  stuckCounter <= (others=>'0');
           sdio_busy <= '0';
           -- Allow CPU to write to sector buffers if we are not talking to the
           -- SD card.
@@ -1305,8 +1319,8 @@ begin  -- behavioural
               f011_buffer_address <= (others => '0');
               sd_state <= DoneReadingSector;
             else
-              -- Still more bytes to read.
-              sd_state <= ReadingSector;
+              -- Still more bytes to read.				  
+              sd_state <= ReadingSector;				  
             end if;
           end if;
 
@@ -1341,7 +1355,13 @@ begin  -- behavioural
           if sdio_busy='0' then
             sd_dowrite <= '1';
             sdio_busy <= '1';
+				
+				if hasReset='1' then
             skip <= 1;
+				hasReset<='0';
+				else 
+				skip <= 0;
+				end if;
             sd_state <= WritingSector;
             sector_offset <= (others => '0');
             sb_writeaddress <= to_integer(sector_offset);
@@ -1372,7 +1392,6 @@ begin  -- behavioural
               -- written the whole sector.
               sd_state <= DoneWritingSector;
             else
-              -- Still more bytes to read.
               sd_state <= WritingSector;
             end if;
           end if;
@@ -1393,6 +1412,8 @@ begin  -- behavioural
 
     end if;
   end process;
+  
+sector_offset_out <= sector_offset; 
 
 end behavioural;
 

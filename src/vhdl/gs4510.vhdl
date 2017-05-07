@@ -36,6 +36,7 @@ use work.cputypes.all;
 
 entity gs4510 is
   port (
+    sector_offset_in : in unsigned(9 downto 0);
     Clock : in std_logic;
     ioclock : in std_logic;
     reset : in std_logic;
@@ -585,7 +586,9 @@ end component;
   signal cpu_pause_shift : integer range 0 to 2 := 0;
 
   signal vector_read_stage : integer range 0 to 15 := 0;
-
+  
+  signal debug_addr : unsigned(1 downto 0); 
+   
   type memory_source is (
     DMAgicRegister,
     HypervisorRegister,
@@ -596,6 +599,7 @@ end component;
     ColourRAM,
     VICIV,
     SlowRAM,
+	 DEBUG,
     Unmapped
     );
 
@@ -1511,9 +1515,64 @@ begin
       if real_long_address(27 downto 12) = x"001F" and real_long_address(11)='1' then
         -- colour ram access: remap to $FF80000 - $FF807FF
         long_address := x"FF80"&'0'&real_long_address(10 downto 0);
-		  -- also remap to $7F40000 - $7F407FF
-      elsif real_long_address(27 downto 16) = x"7F4" then
-		  long_address := x"FF80"&'0'&real_long_address(10 downto 0);
+		--elsif real_long_address(27 downto 0) = x"7F60030" then
+		--Don't map register D030 : 7F6 0030
+		--long_address := real_long_address;
+		elsif real_long_address(27 downto 0) = x"7F70000" then
+        long_address := x"FFF8"&real_long_address(11 downto 0);
+		elsif real_long_address(27 downto 0) = x"7F60000" then
+		--Don't map register D030 : 7F6 0030
+		long_address := real_long_address;
+	   elsif real_long_address(27 downto 0) = x"7F6002F" then
+		--Don't map register D030 : 7F6 0030
+		long_address := real_long_address;
+      --elsif real_long_address(27 downto 12) = x"7F60" and (real_long_address(11 downto 0) < x"080" or real_long_address(11 downto 0) > x"400") and (real_long_address(11 downto 0) <= x"672" or real_long_address(11 downto 0) > x"7FF") then --7F60xxx -> 000Dxxx						
+		elsif real_long_address(27 downto 12) = x"7F60" and (real_long_address(11 downto 0) < x"080" or real_long_address(11 downto 0) > x"400") and (real_long_address(11 downto 0) <= x"672" or real_long_address(11 downto 0) > x"7FF") and	(real_long_address(11 downto 0) < x"C00" or real_long_address(11 downto 0) > x"CEE") then -- or real_long_address(11 downto 0) > x"709") then --7F60xxx -> 000Dxxx				
+				
+		--D672
+		--Don't map register D030 
+		--if real_long_address(11 downto 0) = x"030" then
+		--  long_address := real_long_address;
+		--end if; 
+		
+		--Don't map SD card controls / sector number. 
+		 if real_long_address(11 downto 4) = x"68" then
+		   case real_long_address(3 downto 0) is 
+			when x"0" =>long_address := real_long_address;			
+			when x"1" =>long_address := real_long_address;
+			when x"2" =>long_address := real_long_address;
+			when x"3" =>long_address := real_long_address;
+			when others => long_address := x"FFD3"&real_long_address(11 downto 0);		  
+			end case;		  	
+      --Don't map DMA addresses
+		 elsif real_long_address(11 downto 4) = x"70" then 
+    	   case real_long_address(3 downto 0) is 
+          --the long address should resolve to unmapped space. 
+    			when x"0" =>long_address := real_long_address;
+				when x"1" =>long_address := real_long_address;
+				when x"2" =>long_address := real_long_address;
+				when x"3" =>long_address := real_long_address;
+				when x"4" =>long_address := real_long_address;
+            when x"5" =>long_address := real_long_address;				
+				when x"6" =>long_address := real_long_address;				
+				when others => long_address := x"FFD3"&real_long_address(11 downto 0);		  
+		   end case;			
+			else
+			long_address := x"FFD3"&real_long_address(11 downto 0);
+		 end if;
+		 		  
+		  
+		 --Eventually going to map a different buffer to use in hypervisor mode
+		 --But for now don't map SD buffer that we're using. 
+		 --Not using the SD buffer at this address anymore, using the FFD6000-FFD61FF
+       --FFD3E00-FFD3FFF	 
+		 --if real_long_address(11 downto 7) = x"E" or real_long_address(11 downto 7) = x"F" then
+       --  long_address := real_long_address;
+		 --else
+		 --  long_address := x"FFD3"&real_long_address(11 downto 0);		  
+		 --end if; 
+		 
+		
 		else
         long_address := real_long_address;
       end if;
@@ -1559,7 +1618,7 @@ begin
       report "MEMORY long_address = $" & to_hstring(long_address);
       -- @IO:C64 $0000000 6510/45GS10 CPU port DDR
       -- @IO:C64 $0000001 6510/45GS10 CPU port data
-      if long_address(27 downto 6)&"00" = x"FFD364" and hypervisor_mode='1' then
+      if (long_address(27 downto 6)&"00" = x"FFD364" or long_address(27 downto 6)&"00" = x"7F5000") and hypervisor_mode='1' then
         report "Preparing for reading hypervisor register";
         read_source <= HypervisorRegister;
         accessing_hypervisor <= '1';
@@ -1745,7 +1804,15 @@ begin
         wait_states <= slowram_waitstates;
         wait_states_non_zero <= '1';
         proceed <= '0';
-      else
+      
+		--Remove this.
+		--elsif long_address = x"7FFFF00" then
+		--  read_source <= DEBUG;
+		--  debug_addr <= b"00";
+		--elsif long_address = x"7FFFF01" then
+		-- read_source <= DEBUG;
+		--  debug_addr <= b"01";
+		else
         -- Don't let unmapped memory jam things up
         report "hit unmapped memory -- clearing wait_states" severity note;
         report "Preparing to read from Unmapped";
@@ -1790,16 +1857,16 @@ begin
         when HypervisorRegister =>
           report "HYPERPORT: Reading hypervisor register";
           case hyperport_num is
-            when "000000" => return hyper_a;
-            when "000001" => return hyper_x;
-            when "000010" => return hyper_y;
-            when "000011" => return hyper_z;
-            when "000100" => return hyper_b;
-            when "000101" => return hyper_p;
-            when "000110" => return hyper_sp;
-            when "000111" => return hyper_sph;
-            when "001000" => return hyper_pc(7 downto 0);
-            when "001001" => return hyper_pc(15 downto 8);                           
+            when "000000" => return hyper_a; --IO:GS $D640
+            when "000001" => return hyper_x; --IO:GS $D641
+            when "000010" => return hyper_y; --IO:GS $D642
+            when "000011" => return hyper_z; --IO:GS $D643
+            when "000100" => return hyper_b; --IO:GS $D644
+            when "000101" => return hyper_sp;--hyper_p; --IO:GS $D645
+            when "000110" => return hyper_sph;--hyper_sp; --IO:GS $D646
+            when "000111" => return hyper_p;--hyper_sph; --IO:GS $D647
+            when "001000" => return hyper_pc(7 downto 0); --IO:GS $D648
+            when "001001" => return hyper_pc(15 downto 8); --IO:GS $D649                           
             when "001010" =>
               return unsigned(std_logic_vector(hyper_map_low)
                               & std_logic_vector(hyper_map_offset_low(11 downto 8)));
@@ -1914,6 +1981,12 @@ begin
         when SlowRAM =>
           report "reading slow RAM data. Word is $" & to_hstring(slowram_data_in) severity note;
           return unsigned(slowram_data_in);
+		  when DEBUG =>
+		     if debug_addr = "00" then
+             return sector_offset_in(7 downto 0);
+			  else 
+			    return b"000000"&sector_offset_in(9 downto 8);			  
+			  end if;
         when Unmapped =>
           report "accessing unmapped memory" severity note;
           return x"A0";                     -- make unmmapped memory obvious
@@ -2011,19 +2084,102 @@ begin
         end if;        
       end if;
 
-      
       if real_long_address(27 downto 12) = x"001F" and real_long_address(11)='1' then
         -- colour ram access: remap to $FF80000 - $FF807FF
-        long_address := x"FF80"&'0'&real_long_address(10 downto 0);
+        long_address := x"FF80"&'0'&real_long_address(10 downto 0);		  
+		--elsif real_long_address(27 downto 0) = x"7F60030" then
+		--Don't map register D030 : 7F6 0030
+		--long_address := real_long_address;
+		
+		--Try mapping FFD30000 ? 
+		
+		--elsif real_long_address(27 downto 0) = x"7F60000" then
+		--Don't map register D030 : 7F6 0030
+		--long_address := real_long_address;
+		-- Map the Kickstart Rom maybe? idk. 
+		--elsif real_long_address(27 downto 0) = x"7F70000" then
+      --long_address := x"FFF8"&real_long_address(11 downto 0);
+	   elsif real_long_address(27 downto 0) = x"7F6002F" then
+		--Don't map register D030 : 7F6 0030
+		long_address := real_long_address;
+		
+		--map out exceptions
+      elsif real_long_address(27 downto 12) = x"7F60" and (real_long_address(11 downto 0) < x"080" or real_long_address(11 downto 0) > x"400") and (real_long_address(11 downto 0) <= x"672" or real_long_address(11 downto 0) > x"7FF") and	(real_long_address(11 downto 0) < x"C00" or real_long_address(11 downto 0) > x"CEE") then -- or real_long_address(11 downto 0) > x"709") then --7F60xxx -> 000Dxxx				
+				--Don't map SD card controls / sector number. 
+		 if real_long_address(11 downto 4) = x"68" then
+		   case real_long_address(3 downto 0) is 
+			when x"0" =>long_address := real_long_address;			
+			when x"1" =>long_address := real_long_address;
+			when x"2" =>long_address := real_long_address;
+			when x"3" =>long_address := real_long_address;
+			when others => long_address := x"FFD3"&real_long_address(11 downto 0);		  
+			end case;		  	
+      --Don't map DMA addresses
+		 elsif real_long_address(11 downto 4) = x"70" then 
+    	   case real_long_address(3 downto 0) is 
+          --the long address should resolve to unmapped space. 
+    			when x"0" =>long_address := real_long_address;
+				when x"1" =>long_address := real_long_address;
+				when x"2" =>long_address := real_long_address;
+				when x"3" =>long_address := real_long_address;
+				when x"4" =>long_address := real_long_address;
+            when x"5" =>long_address := real_long_address;				
+				when x"6" =>long_address := real_long_address;				
+				when others => long_address := x"FFD3"&real_long_address(11 downto 0);		  
+		   end case;			
+			else
+			--Map everything else to FFD3xxx 
+			long_address := x"FFD3"&real_long_address(11 downto 0);
+		 end if;
+		
+	   --Don't map register D030 7F6 0030
+		--if real_long_address(11 downto 4) = x"03" then
 		  
-      elsif real_long_address(27 downto 16) = x"7F4" then
-		  long_address := x"FF80"&'0'&real_long_address(10 downto 0);
+		--end if; 
+		
+		--Don't map SD card controls / sector number. 
+--		 if real_long_address(11 downto 4) = x"68" then
+--		   case real_long_address(3 downto 0) is 
+--			when x"0" =>long_address := real_long_address;			
+--			when x"1" =>long_address := real_long_address;
+--			when x"2" =>long_address := real_long_address;
+--			when x"3" =>long_address := real_long_address;
+--			when others => long_address := x"FFD3"&real_long_address(11 downto 0);		  
+--			end case;		  	
+--		  end if;
+--		 --Eventually going to map a different buffer to use in hypervisor mode
+--		 --But for now don't map SD buffer that we're using. 
+--       --FFD3E00-FFD3FFF		 
+--		 --Not using the buffer here anymore. 
+--		 --if real_long_address(11 downto 7) = x"E" or real_long_address(11 downto 7) = x"F" then
+--       --  long_address := real_long_address;
+--		 --else
+--		 --  long_address := x"FFD3"&real_long_address(11 downto 0);		  
+--		 --end if;
+--		 
+--		 --Don't map DMA addresses
+--		 if real_long_address(11 downto 4) = x"70" then 
+--    	   case real_long_address(3 downto 0) is 
+--    			when x"0" =>long_address := real_long_address;
+--				when x"1" =>long_address := real_long_address;
+--				when x"2" =>long_address := real_long_address;
+--				when x"3" =>long_address := real_long_address;
+--				when x"4" =>long_address := real_long_address;
+--            when x"5" =>long_address := real_long_address;
+--            when x"6" =>long_address := real_long_address;
+--				when others => long_address := x"FFD3"&real_long_address(11 downto 0);		  
+--		   end case;
+--		 end if;
+--		 
       else
+		
         long_address := real_long_address;
       end if;
 
-      last_write_address <= real_long_address;
-
+      --last_write_address <= real_long_address;
+		--Writing to hypervisor regs use last_write_address 		
+      last_write_address <= long_address;
+		
       -- Write to CPU port
       if (long_address = x"0000000") then
         report "MEMORY: Writing to CPU DDR register" severity note;
@@ -2496,81 +2652,81 @@ begin
         end if;
 
         -- @IO:GS $D640 - Hypervisor A register storage
-        if last_write_address = x"FFD3640" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3640" or last_write_address = x"7F50000") and hypervisor_mode='1' then
           hyper_a <= last_value;
         end if;
         -- @IO:GS $D641 - Hypervisor X register storage
-        if last_write_address = x"FFD3641" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3641" or last_write_address = x"7F50001") and hypervisor_mode='1' then
           hyper_x <= last_value;
         end if;
         -- @IO:GS $D642 - Hypervisor Y register storage
-        if last_write_address = x"FFD3642" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3642" or last_write_address = x"7F50002") and hypervisor_mode='1' then
           hyper_y <= last_value;
         end if;
         -- @IO:GS $D643 - Hypervisor Z register storage
-        if last_write_address = x"FFD3643" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3643" or last_write_address = x"7F50003") and hypervisor_mode='1' then
           hyper_z <= last_value;
         end if;
         -- @IO:GS $D644 - Hypervisor B register storage
-        if last_write_address = x"FFD3644" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3644" or last_write_address = x"7F50004") and hypervisor_mode='1' then
           hyper_b <= last_value;
         end if;
         -- @IO:GS $D645 - Hypervisor SPL register storage
-        if last_write_address = x"FFD3645" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3645" or last_write_address = x"7F50005") and hypervisor_mode='1' then
           hyper_sp <= last_value;
         end if;
         -- @IO:GS $D646 - Hypervisor SPH register storage
-        if last_write_address = x"FFD3646" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3646" or last_write_address = x"7F50006") and hypervisor_mode='1' then
           hyper_sph <= last_value;
         end if;
         -- @IO:GS $D647 - Hypervisor P register storage
-        if last_write_address = x"FFD3647" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3647" or last_write_address = x"7F50007") and hypervisor_mode='1' then
           hyper_p <= last_value;
         end if;
         -- @IO:GS $D648 - Hypervisor PC-low register storage
-        if last_write_address = x"FFD3648" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3648" or last_write_address = x"7F50008") and hypervisor_mode='1' then
           hyper_pc(7 downto 0) <= last_value;
         end if;
         -- @IO:GS $D649 - Hypervisor PC-high register storage
-        if last_write_address = x"FFD3649" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3649" or last_write_address = x"7F50009") and hypervisor_mode='1' then
           hyper_pc(15 downto 8) <= last_value;
         end if;
         -- @IO:GS $D64A - Hypervisor MAPLO register storage (high bits)
-        if last_write_address = x"FFD364A" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD364A" or last_write_address =  x"7F5000A") and hypervisor_mode='1' then
           hyper_map_low <= std_logic_vector(last_value(7 downto 4));
           hyper_map_offset_low(11 downto 8) <= last_value(3 downto 0);
         end if;
         -- @IO:GS $D64B - Hypervisor MAPLO register storage (low bits)
-        if last_write_address = x"FFD364B" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD364B" or last_write_address =  x"7F5000B") and hypervisor_mode='1' then
           hyper_map_offset_low(7 downto 0) <= last_value;
         end if;
         -- @IO:GS $D64C - Hypervisor MAPHI register storage (high bits)
-        if last_write_address = x"FFD364C" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD364C" or last_write_address =  x"7F5000C") and hypervisor_mode='1' then
           hyper_map_high <= std_logic_vector(last_value(7 downto 4));
           hyper_map_offset_high(11 downto 8) <= last_value(3 downto 0);
         end if;
         -- @IO:GS $D64D - Hypervisor MAPHI register storage (low bits)
-        if last_write_address = x"FFD364D" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD364D" or last_write_address =  x"7F5000D") and hypervisor_mode='1' then
           hyper_map_offset_high(7 downto 0) <= last_value;
         end if;
         -- @IO:GS $D64E - Hypervisor MAPLO mega-byte number register storage
-        if last_write_address = x"FFD364E" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD364E" or last_write_address =  x"7F5000E") and hypervisor_mode='1' then
           hyper_mb_low <= last_value;
         end if;
         -- @IO:GS $D64F - Hypervisor MAPHI mega-byte number register storage
-        if last_write_address = x"FFD364F" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD364F" or last_write_address =  x"7F5000F") and hypervisor_mode='1' then
           hyper_mb_high <= last_value;
         end if;
         -- @IO:GS $D650 - Hypervisor CPU port $00 value
-        if last_write_address = x"FFD3650" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3650" or last_write_address =  x"7F50010") and hypervisor_mode='1' then
           hyper_port_00 <= last_value;
         end if;
         -- @IO:GS $D651 - Hypervisor CPU port $01 value
-        if last_write_address = x"FFD3651" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3651" or last_write_address =  x"7F50011") and hypervisor_mode='1' then
           hyper_port_01 <= last_value;
         end if;
         -- @IO:GS $D652 - Hypervisor VIC-IV IO mode
-        if last_write_address = x"FFD3652" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3652" or last_write_address =  x"7F50012") and hypervisor_mode='1' then
           hyper_iomode <= last_value;
         end if;
         -- @IO:GS $D653 - Hypervisor DMAgic source MB
@@ -2600,55 +2756,55 @@ begin
         -- @IO:GS $D659 - Hypervisor DDR RAM banking control
         -- @IO:GS $D659.7 - Enable DDR RAM banking
         -- @IO:GS $D659.0-2 - Select which 16MB DDR RAM bank to make visible
-        if last_write_address = x"FFD3659" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3659" or last_write_address =  x"7F50019") and hypervisor_mode='1' then
           ddr_ram_banking <= last_value(7);
           ddr_ram_bank <= std_logic_vector(last_value(2 downto 0));
         end if;
 
         -- @IO:GS $D65D - Hypervisor current virtual page number (low byte)
-        if last_write_address = x"FFD365D" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD365D" or last_write_address =  x"7F5001D") and hypervisor_mode='1' then
           reg_pagenumber(1 downto 0) <= last_value(7 downto 6);
           reg_pageactive <= last_value(4);
           reg_pages_dirty <= std_logic_vector(last_value(3 downto 0));
         end if;
         -- @IO:GS $D65E - Hypervisor current virtual page number (mid byte)
-        if last_write_address = x"FFD365E" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD365E" or last_write_address =  x"7F5001E") and hypervisor_mode='1' then
           reg_pagenumber(9 downto 2) <= last_value;
         end if;
         -- @IO:GS $D65F - Hypervisor current virtual page number (high byte)
-        if last_write_address = x"FFD365F" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD365F" or last_write_address =  x"7F5001F") and hypervisor_mode='1' then
           reg_pagenumber(17 downto 10) <= last_value;
         end if;
         -- @IO:GS $D660 - Hypervisor virtual memory page 0 logical page low byte
         -- @IO:GS $D661 - Hypervisor virtual memory page 0 logical page high byte
         -- @IO:GS $D662 - Hypervisor virtual memory page 0 physical page low byte
         -- @IO:GS $D663 - Hypervisor virtual memory page 0 physical page high byte
-        if last_write_address = x"FFD3660" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3660" or last_write_address =  x"7F50020") and hypervisor_mode='1' then
           reg_page0_logical(7 downto 0) <= last_value;
         end if;
-        if last_write_address = x"FFD3661" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3661" or last_write_address =  x"7F50021") and hypervisor_mode='1' then
           reg_page0_logical(15 downto 8) <= last_value;
         end if;
-        if last_write_address = x"FFD3662" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3662" or last_write_address =  x"7F50022") and hypervisor_mode='1' then
           reg_page0_physical(7 downto 0) <= last_value;
         end if;
-        if last_write_address = x"FFD3663" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3663" or last_write_address =  x"7F50023") and hypervisor_mode='1' then
           reg_page0_physical(15 downto 8) <= last_value;
         end if;
         -- @IO:GS $D664 - Hypervisor virtual memory page 1 logical page low byte
         -- @IO:GS $D665 - Hypervisor virtual memory page 1 logical page high byte
         -- @IO:GS $D666 - Hypervisor virtual memory page 1 physical page low byte
         -- @IO:GS $D667 - Hypervisor virtual memory page 1 physical page high byte
-        if last_write_address = x"FFD3664" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3664" or last_write_address =  x"7F50024") and hypervisor_mode='1' then
           reg_page1_logical(7 downto 0) <= last_value;
         end if;
-        if last_write_address = x"FFD3665" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3665" or last_write_address =  x"7F50025") and hypervisor_mode='1' then
           reg_page1_logical(15 downto 8) <= last_value;
         end if;
-        if last_write_address = x"FFD3666" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3666" or last_write_address =  x"7F50026") and hypervisor_mode='1' then
           reg_page1_physical(7 downto 0) <= last_value;
         end if;
-        if last_write_address = x"FFD3667" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3667" or last_write_address =  x"7F50027") and hypervisor_mode='1' then
           reg_page1_physical(15 downto 8) <= last_value;
         end if;
 
@@ -2656,53 +2812,53 @@ begin
         -- @IO:GS $D669 - Hypervisor virtual memory page 2 logical page high byte
         -- @IO:GS $D66A - Hypervisor virtual memory page 2 physical page low byte
         -- @IO:GS $D66B - Hypervisor virtual memory page 2 physical page high byte
-        if last_write_address = x"FFD3668" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3668" or last_write_address =  x"7F50028") and hypervisor_mode='1' then
           reg_page2_logical(7 downto 0) <= last_value;
         end if;
-        if last_write_address = x"FFD3669" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3669" or last_write_address =  x"7F50029") and hypervisor_mode='1' then
           reg_page2_logical(15 downto 8) <= last_value;
         end if;
-        if last_write_address = x"FFD366A" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD366A" or last_write_address =  x"7F5002A") and hypervisor_mode='1' then
           reg_page2_physical(7 downto 0) <= last_value;
         end if;
-        if last_write_address = x"FFD366B" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD366B"  or last_write_address =  x"7F5002B")and hypervisor_mode='1' then
           reg_page2_physical(15 downto 8) <= last_value;
         end if;
         -- @IO:GS $D66C - Hypervisor virtual memory page 3 logical page low byte
         -- @IO:GS $D66D - Hypervisor virtual memory page 3 logical page high byte
         -- @IO:GS $D66E - Hypervisor virtual memory page 3 physical page low byte
         -- @IO:GS $D66F - Hypervisor virtual memory page 3 physical page high byte
-        if last_write_address = x"FFD366C" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD366C" or last_write_address =  x"7F5002C") and hypervisor_mode='1' then
           reg_page3_logical(7 downto 0) <= last_value;
         end if;
-        if last_write_address = x"FFD366D" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD366D" or last_write_address =  x"7F5002D") and hypervisor_mode='1' then
           reg_page3_logical(15 downto 8) <= last_value;
         end if;
-        if last_write_address = x"FFD366E" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD366E" or last_write_address =  x"7F5002E") and hypervisor_mode='1' then
           reg_page3_physical(7 downto 0) <= last_value;
         end if;
-        if last_write_address = x"FFD366F" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD366F" or last_write_address =  x"7F5002F") and hypervisor_mode='1' then
           reg_page3_physical(15 downto 8) <= last_value;
         end if;
 
         -- @IO:GS $D670 - Hypervisor GeoRAM base address (x MB) (write-only for
         -- now)
-        if last_write_address = x"FFD3670" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3670" or last_write_address =  x"7F50030") and hypervisor_mode='1' then
           georam_page(19 downto 12) <= last_value;
         end if;
         -- @IO:GS $D671 - Hypervisor GeoRAM address mask (applied to GeoRAM block
         -- register) (write-only for now)
-        if last_write_address = x"FFD3671" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD3671" or last_write_address =  x"7F50031") and hypervisor_mode='1' then
           georam_blockmask <= last_value;
         end if;   
  		  
 		  -- @IO:GS $D672 - Protected Hardware configuration 
-		  if last_write_address = x"FFD3672" and hypervisor_mode='1' then
+		  if (last_write_address = x"FFD3672" or last_write_address =  x"7F50032") and hypervisor_mode='1' then
           hyper_protected_hardware(7 downto 0) <= last_value;
         end if; 
 
         -- @IO:GS $D67C.0-7 - (write) Hypervisor write serial output to UART monitor
-        if last_write_address = x"FFD367C" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD367C" or last_write_address =  x"7F5003C") and hypervisor_mode='1' then
           monitor_char <= last_value;
           monitor_char_toggle <= monitor_char_toggle_internal;
           monitor_char_toggle_internal <= not monitor_char_toggle_internal;
@@ -2722,7 +2878,7 @@ begin
         -- @IO:GS $D67D.7 - Hypervisor flag to indicate if an NMI is pending on exit from the hypervisor.
         
         -- @IO:GS $D67D - Hypervisor watchdog register: writing any value clears the watch dog
-        if last_write_address = x"FFD367D" and hypervisor_mode='1' then
+        if (last_write_address = x"FFD367D" or last_write_address =  x"7F5003D") and hypervisor_mode='1' then
           rom_from_colour_ram <= last_value(0);
           flat32_enabled <= last_value(1);
           rom_writeprotect <= last_value(2);

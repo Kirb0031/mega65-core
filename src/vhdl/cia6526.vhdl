@@ -169,9 +169,32 @@ begin  -- behavioural
           case register_number is
             when x"00" => fastio_rdata <= unsigned(reg_porta_read); -- reg_porta_read;
             when x"01" => fastio_rdata <= unsigned(reg_portb_read); -- reg_portb_read;
-            when x"10" => fastio_rdata <= unsigned(portain); -- reg_porta_read;
-            when x"11" => fastio_rdata <= unsigned(portbin); -- reg_portb_read;
-            when x"02" => fastio_rdata <= unsigned(reg_porta_ddr);
+				--when x"10" => fastio_rdata <= unsigned(portain); -- reg_porta_read;
+            --when x"11" => fastio_rdata <= unsigned(portbin); -- reg_portb_read;
+            
+				------Read Extended Regs:
+				when x"10" => fastio_rdata <= reg_timera(7 downto 0);
+				when x"11" => fastio_rdata <= reg_timera_latch(7 downto 0);
+				when x"12" => fastio_rdata <= reg_timera(15 downto 8);
+				when x"13" => fastio_rdata <= reg_timera_latch(15 downto 8);
+				
+				when x"14" => fastio_rdata <= reg_timerb(7 downto 0);
+				when x"15" => fastio_rdata <= reg_timerb_latch(7 downto 0);
+				when x"16" => fastio_rdata <= reg_timerb(15 downto 8);
+				when x"17" => fastio_rdata <= reg_timerb_latch(15 downto 8);
+				
+				--Direct read interrupt mask
+				when x"18" => 
+				  fastio_rdata(7 downto 5) <= b"000";
+				  fastio_rdata(4) <= imask_flag;
+              fastio_rdata(3) <= imask_serialport;
+              fastio_rdata(2) <= imask_alarm;
+              fastio_rdata(1) <= imask_tb;
+              fastio_rdata(0) <= imask_ta;				  								  							
+				  
+				
+            ------
+				when x"02" => fastio_rdata <= unsigned(reg_porta_ddr);
             when x"03" => fastio_rdata <= unsigned(reg_portb_ddr);
             when x"04" => fastio_rdata <= reg_timera(7 downto 0);
             when x"05" => fastio_rdata <= reg_timera(15 downto 8);
@@ -246,7 +269,9 @@ begin  -- behavioural
     return result;
   end ddr_pick;
 
-  variable register_number : unsigned(3 downto 0);
+  --variable register_number : unsigned(3 downto 0);
+    variable register_number : unsigned(7 downto 0);
+
   begin
     if rising_edge(cpuclock) then
 
@@ -259,7 +284,10 @@ begin  -- behavioural
         imask_ta <= '0';
       end if;
       
-      register_number := fastio_address(3 downto 0);
+        --register_number := fastio_address(3 downto 0);
+        register_number(7 downto 5) := (others => '0');
+        register_number(4 downto 0) := fastio_address(4 downto 0);
+
 
       reg_isr_out(7) <= reg_isr(7);
       reg_isr_out(0) <= reg_isr(0);
@@ -432,19 +460,21 @@ begin  -- behavioural
       -- Check for register read side effects
       if fastio_write='0' and cs='1' then
         --report "Performing side-effects of reading from CIA register $" & to_hstring(register_number) severity note;
-        register_number := fastio_address(3 downto 0);
+        --register_number := fastio_address(3 downto 0);
+        register_number(4 downto 0) := fastio_address(4 downto 0);
+
         case register_number is
-          when x"1" =>
+          when x"01" =>
             -- Reading or writing port B strobes PC high for 1 cycle
             pcout <= '1';
             strobe_pc <= '1';
-          when x"8" => read_tod_latched <='0';
-          when x"b" =>
+          when x"08" => read_tod_latched <='0';
+          when x"0b" =>
             read_tod_latched <='1';
             read_tod_mins <= reg_tod_mins;
             read_tod_secs <= reg_tod_secs;
             read_tod_dsecs <= reg_tod_dsecs;
-          when x"d" =>
+          when x"0d" =>
             -- Reading ICR/ISR clears all interrupts
             clear_isr <= '1';
             clear_isr_count <= clear_isr_count + 1;
@@ -459,46 +489,78 @@ begin  -- behavioural
       if fastio_write='1' and cs='1' then
         --report "writing $" & to_hstring(fastio_wdata)
         --  & " to CIA register $" & to_hstring(register_number) severity note;
-        register_number := fastio_address(3 downto 0);
+        --register_number := fastio_address(3 downto 0);
+		  register_number(4 downto 0) := fastio_address(4 downto 0);
         case register_number is
-          when x"0" => 
+		  
+		  		------Write Extended Regs:
+				when x"10" => reg_timera(7 downto 0) <= fastio_wdata;
+				when x"11" => reg_timera_latch(7 downto 0) <= fastio_wdata; 
+				when x"12" => reg_timera(15 downto 8) <= fastio_wdata;
+				when x"13" => reg_timera_latch(15 downto 8) <= fastio_wdata;
+				              --if reg_timera_start='0' then
+                          ---- load timer value now (CIA datasheet, page 6)
+                          --  reg_timera <= fastio_wdata & reg_timera_latch(7 downto 0);
+                          --end if;
+				
+				when x"14" => reg_timerb(7 downto 0) <= fastio_wdata;
+				when x"15" => reg_timerb_latch(7 downto 0) <= fastio_wdata;
+				when x"16" => reg_timerb(15 downto 8) <= fastio_wdata;
+				when x"17" => reg_timerb_latch(15 downto 8) <= fastio_wdata;
+--				              if reg_timera_start='0' then
+--                          -- load timer value now 
+--								  -- How are we going to handle restoring of timers?
+--								  -- Maybe map out reg_timera_start and put it right at the end?
+--								  -- Or map IO in general riight at tne end? 
+--                            reg_timerb <= fastio_wdata & reg_timerb_latch(7 downto 0);
+--                          end if;
+				--Direct write interrupt mask
+				when x"18" => 				  
+				  imask_flag  <= fastio_wdata(4);
+              imask_serialport <= fastio_wdata(3);
+              imask_alarm <= fastio_wdata(2);
+              imask_tb <= fastio_wdata(1);
+              imask_ta <= fastio_wdata(0);				  								  							
+
+		    
+          when x"00" => 
                        reg_porta_out<=std_logic_vector(fastio_wdata);
-          when x"1" =>  
+          when x"01" =>  
             
             reg_portb_out<=std_logic_vector(fastio_wdata);
-          when x"2" => reg_porta_ddr<=std_logic_vector(fastio_wdata);
-          when x"3" => reg_portb_ddr<=std_logic_vector(fastio_wdata);
-          when x"4" => reg_timera_latch(7 downto 0) <= fastio_wdata;
-          when x"5" => reg_timera_latch(15 downto 8) <= fastio_wdata;
+          when x"02" => reg_porta_ddr<=std_logic_vector(fastio_wdata);
+          when x"03" => reg_portb_ddr<=std_logic_vector(fastio_wdata);
+          when x"04" => reg_timera_latch(7 downto 0) <= fastio_wdata;
+          when x"05" => reg_timera_latch(15 downto 8) <= fastio_wdata;
                        if reg_timera_start='0' then
                          -- load timer value now (CIA datasheet, page 6)
                          reg_timera <= fastio_wdata & reg_timera_latch(7 downto 0);
                        end if;
-          when x"6" => reg_timerb_latch(7 downto 0) <= fastio_wdata;
-          when x"7" => reg_timerb_latch(15 downto 8) <= fastio_wdata;
+          when x"06" => reg_timerb_latch(7 downto 0) <= fastio_wdata;
+          when x"07" => reg_timerb_latch(15 downto 8) <= fastio_wdata;
                        if reg_timera_start='0' then
                          -- load timer value now (CIA datasheet, page 6)
                          reg_timerb <= fastio_wdata & reg_timerb_latch(7 downto 0);
                        end if;
-          when x"8" =>
+          when x"08" =>
             if reg_tod_alarm_edit ='0' then
               reg_tod_dsecs <= fastio_wdata; tod_running<='1';
             else
               reg_alarm_dsecs <= fastio_wdata;
             end if;
-          when x"9" => 
+          when x"09" => 
             if reg_tod_alarm_edit ='0' then
               reg_tod_secs <= fastio_wdata;
             else
               reg_alarm_secs <= fastio_wdata;
             end if;
-          when x"a" => 
+          when x"0a" => 
             if reg_tod_alarm_edit ='0' then
               reg_tod_mins <= fastio_wdata;
             else
               reg_alarm_mins <= fastio_wdata;
             end if;
-          when x"b" => 
+          when x"0b" => 
             if reg_tod_alarm_edit ='0' then
               tod_running <= '0';
               reg_tod_hours <= fastio_wdata(6 downto 0);
@@ -507,10 +569,10 @@ begin  -- behavioural
               reg_alarm_hours <= fastio_wdata(6 downto 0);
               reg_alarm_ampm <= fastio_wdata(7);
             end if;
-          when x"c" =>
+          when x"0c" =>
             reg_sdr_data <= std_logic_vector(fastio_wdata);
             sdr_loaded <= '1';
-          when x"d" =>
+          when x"0d" =>
             if fastio_wdata(7)='1' then
               -- Set interrupt mask bits
               imask_flag <= imask_flag or fastio_wdata(4);
@@ -528,7 +590,7 @@ begin  -- behavioural
               imask_tb <= imask_tb and (not fastio_wdata(1));
               imask_ta <= imask_ta and (not fastio_wdata(0));                 
             end if;
-          when x"e" =>
+          when x"0e" =>
             reg_60hz <= fastio_wdata(7);
             reg_serialport_direction <= fastio_wdata(6);
             reg_timera_tick_source <= fastio_wdata(5);
@@ -541,7 +603,7 @@ begin  -- behavioural
             reg_timera_toggle_or_pulse <= fastio_wdata(2);
             reg_timera_pb6_out <= fastio_wdata(1);
             reg_timera_start <= fastio_wdata(0);
-          when x"f" =>
+          when x"0f" =>
             reg_tod_alarm_edit <= std_logic(fastio_wdata(7));
             reg_timerb_tick_source <= std_logic_vector(fastio_wdata(6 downto 5));
             if fastio_wdata(4)='1' then

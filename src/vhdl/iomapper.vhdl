@@ -6,7 +6,8 @@ use ieee.numeric_std.all;
 use work.debugtools.all;
 
 entity iomapper is
-  port (Clk : in std_logic;
+  port (sector_offset_out : out unsigned(9 downto 0);
+        Clk : in std_logic;
         protected_hardware_in : in unsigned(7 downto 0);
         cpuclock : in std_logic;
         pixelclk : in std_logic;
@@ -199,6 +200,7 @@ architecture behavioral of iomapper is
   
   component sdcardio is
     port (
+	   sector_offset_out : out unsigned(9 downto 0);
       clock : in std_logic;
       pixelclk : in std_logic;
       reset : in std_logic;
@@ -721,6 +723,7 @@ begin
     );
   
   sdcard0 : sdcardio port map (
+    sector_offset_out => sector_offset_out,
     pixelclk => pixelclk,
     clock => clk,
     reset => reset,
