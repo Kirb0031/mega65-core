@@ -59,6 +59,7 @@
 	.space ts_dmalist 10
         .space delayCounter 1
         .space ts_sector_counter 2
+	.space ts_select 1
 
 	; make sure that we don't go past the 256 byte page reserved for hypervisor scratch space
 	;

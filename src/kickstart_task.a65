@@ -168,11 +168,12 @@ double_restore_trap:
 	sta $D020
 	jsr sd_unmap_sectorbuffer ;so we can write to cia regs. 
 
-	jsr ts_read_from_sd        
+	;;jsr ts_read_from_sd        
 	;give us something to break on
         nop
 	nop
 	
+        jsr task_switcher
 
 	; return from hypervisor        
 	sta hypervisor_enterexit_trigger
@@ -254,6 +255,10 @@ write_next_to_sd:
  jsr set_sector
 ; Next Address
  jsr inc_address_write
+
+
+; Make sure SD is ready
+;jsr wait_for_ready
 
 ; Start DMA transfer
  jsr ts_initiate_dma
@@ -759,3 +764,121 @@ lda #$00
 sta ts_dmalist+10
 
 rts
+
+;====================
+
+ 
+     ;Task Switcher
+     ;We can use all of ram since current 
+     ;task is auto-backed up to SD card, 
+     ;while deciding what to
+     ;ultimately do with it. 	 
+	 
+     ; Assuming C64 Mode	 
+     ; Which might eventually be a bad idea.
+
+	 
+task_switcher:
+;Main Loop
+
+jsr ts_initalise 
+jsr ts_updatescreen
+
+rts
+
+=================
+
+ts_initalise:
+	 
+; Clear screen
+	 lda #$0e
+	 sta $d020
+	 lda #$06
+	 sta $d021
+	 ; Lower-case
+	 lda #$0e
+	 ;jsr $ffd2
+     	 	 
+	 ; set to lower case
+         lda #$17
+         sta $d018
+	 
+	 ldx #0
+ts_clearScreen:	 
+     lda #$20
+     sta $0400,x
+     sta $0500,x
+     sta $0600,x
+     sta $0700,x
+     lda #$e
+     sta $d800,x 
+     sta $d900,x
+     sta $da00,x
+     sta $db00,x
+     inx
+     bne ts_clearScreen
+
+
+;initialise selection variable
+
+lda $00
+sta ts_select
+
+; top text
+
+  ldy #19
+ts_writebanner:  
+  lda ts_topbanner,y 
+  ora #$80 ;invert?
+  sta $0400,y
+  dey
+  bpl ts_writebanner 
+
+rts
+
+;;==================
+
+ts_updatescreen: 
+
+; main selection
+ldy #3
+ts_writesave:
+; is selected?
+  lda ts_select
+  and $01 ;bit test first bit
+  bne savenosel
+  lda ts_save, y
+savesel:
+  ora #$80
+savenosel:
+  sta $0479, y
+  dey
+  bpl ts_writesave
+
+ldy #3
+ts_writeload: 
+  lda ts_load, y
+  sta $04c9, y
+  dey
+  bpl ts_writeload
+
+waitforkey:
+  jsr $ffe4
+  bne havekey
+havekey:
+
+rts  
+
+;=============
+ts_adjustcurrentitem:
+rts
+ 
+;==============
+
+;;Constants
+
+ts_topbanner: ;T   A   S   K        S   W  I   T  C  H    E   R  
+        .byte $54,$01,$13,$0b,$20,$53,$17,$09,$14,$03,$08,$05,$12,$20,$56,$30,$30,$2e,$30,$31
+
+ts_save: .byte $53, $01, $16, $05
+ts_load: .byte $4C, $0F, $01, $04 
