@@ -54,6 +54,13 @@ entity gs4510 is
 	 --Bit 6: Matrix Mode enable
 	 --Bit 7: Secure Mode enable 
 	 
+	 -- Secure Mode: 
+	 --   Disables the following peripherals:
+	 --     - Ethernet Access
+	 --     - SD Card Access 
+	 --     - PS/2 Keyboard (eventually) Access
+	 --     - External Serial output (Matrix mode still works)
+	 
 	 
     cpu_hypervisor_mode : out std_logic;
     iomode_set : out std_logic_vector(1 downto 0) := "11";
@@ -1527,7 +1534,7 @@ begin
 		--Don't map register D030 : 7F6 0030
 		long_address := real_long_address;
       --elsif real_long_address(27 downto 12) = x"7F60" and (real_long_address(11 downto 0) < x"080" or real_long_address(11 downto 0) > x"400") and (real_long_address(11 downto 0) <= x"672" or real_long_address(11 downto 0) > x"7FF") then --7F60xxx -> 000Dxxx						
-		elsif real_long_address(27 downto 12) = x"7F60" and (real_long_address(11 downto 0) < x"080" or real_long_address(11 downto 0) > x"400") and (real_long_address(11 downto 0) <= x"672" or real_long_address(11 downto 0) > x"7FF") and	(real_long_address(11 downto 0) < x"C00" or real_long_address(11 downto 0) > x"CEE") then -- or real_long_address(11 downto 0) > x"709") then --7F60xxx -> 000Dxxx				
+		elsif real_long_address(27 downto 12) = x"7F60" and (real_long_address(11 downto 0) < x"080" or real_long_address(11 downto 0) > x"400") and (real_long_address(11 downto 0) <= x"672" or real_long_address(11 downto 0) > x"7FF") and	(real_long_address(11 downto 0) < x"C00" or real_long_address(11 downto 0) > x"CEE") and (real_long_address(11 downto 0) < x"D00" or real_long_address(11 downto 0) > x"DEE") then -- or real_long_address(11 downto 0) > x"709") then --7F60xxx -> 000Dxxx				
 				
 		--D672
 		--Don't map register D030 
@@ -2104,7 +2111,7 @@ begin
 		long_address := real_long_address;
 		
 		--map out exceptions
-      elsif real_long_address(27 downto 12) = x"7F60" and (real_long_address(11 downto 0) < x"080" or real_long_address(11 downto 0) > x"400") and (real_long_address(11 downto 0) <= x"672" or real_long_address(11 downto 0) > x"7FF") and	(real_long_address(11 downto 0) < x"C00" or real_long_address(11 downto 0) > x"CEE") then -- or real_long_address(11 downto 0) > x"709") then --7F60xxx -> 000Dxxx				
+      elsif real_long_address(27 downto 12) = x"7F60" and (real_long_address(11 downto 0) < x"080" or real_long_address(11 downto 0) > x"400") and (real_long_address(11 downto 0) <= x"672" or real_long_address(11 downto 0) > x"7FF") and	(real_long_address(11 downto 0) < x"C00" or real_long_address(11 downto 0) > x"CEE")and (real_long_address(11 downto 0) < x"D00" or real_long_address(11 downto 0) > x"DEE") then -- or real_long_address(11 downto 0) > x"709") then --7F60xxx -> 000Dxxx				
 				--Don't map SD card controls / sector number. 
 		 if real_long_address(11 downto 4) = x"68" then
 		   case real_long_address(3 downto 0) is 

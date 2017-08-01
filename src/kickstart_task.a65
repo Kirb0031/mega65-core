@@ -168,12 +168,12 @@ double_restore_trap:
 	sta $D020
 	jsr sd_unmap_sectorbuffer ;so we can write to cia regs. 
 
-	;;jsr ts_read_from_sd        
+	jsr ts_read_from_sd        
 	;give us something to break on
-        nop
-	nop
+        ;nop
+	;nop
 	
-        jsr task_switcher
+        ;jsr task_switcher
 
 	; return from hypervisor        
 	sta hypervisor_enterexit_trigger
@@ -779,14 +779,87 @@ rts
 
 	 
 task_switcher:
-;Main Loop
+
+.alias pra $dc00
+.alias prb $dc01
+.alias ddra $dc02
+.alias ddrb $dc03
 
 jsr ts_initalise 
+
+mainloop:
+
 jsr ts_updatescreen
+
+
+check_keyboard:
+lda #$ff
+sta ddra
+lda #$00
+sta ddrb
+
+check_w:
+lda #%11111101 ;select row 2
+sta pra
+lda prb
+and #%00000010 ; test w key
+beq selup
+
+check_s:
+lda #%11111101 ;select row 2
+sta pra
+lda prb
+and #%00100000 ; test w key
+beq seldown
+
+jmp mainloop
 
 rts
 
-=================
+
+
+selup: 
+jsr w_release
+lda ts_select
+sbc #$1
+sta ts_select
+jmp flashbg
+jmp mainloop
+
+seldown: 
+jsr s_release
+lda ts_select
+adc #$1
+sta ts_select
+jmp flashbg
+jmp mainloop
+
+flashbg:
+  lda $D020
+  inc 
+  and #$0f
+  sta $D020
+jmp mainloop
+
+;;block until the key is released
+w_release:
+lda #%11111101 ;select row 2
+sta pra
+lda prb
+and #%00000010 
+beq w_release
+rts
+
+s_release:
+lda #%11111101 ;select row 2
+sta pra
+lda prb
+and #%00100000 ; test w key
+beq s_release
+rts
+
+
+;;=================
 
 ts_initalise:
 	 
@@ -798,7 +871,7 @@ ts_initalise:
 	 ; Lower-case
 	 lda #$0e
 	 ;jsr $ffd2
-     	 	 
+
 	 ; set to lower case
          lda #$17
          sta $d018
@@ -817,7 +890,6 @@ ts_clearScreen:
      sta $db00,x
      inx
      bne ts_clearScreen
-
 
 ;initialise selection variable
 
@@ -847,32 +919,35 @@ ts_writesave:
   lda ts_select
   and $01 ;bit test first bit
   bne savenosel
-  lda ts_save, y
 savesel:
+  lda ts_save, y
   ora #$80
+  jmp savenosel_cont
 savenosel:
+  lda ts_save, y
+savenosel_cont:
   sta $0479, y
   dey
   bpl ts_writesave
 
 ldy #3
 ts_writeload: 
+  lda ts_select
+  and $01 ;bit test first bit
+  beq loadnosel
+loadsel:
   lda ts_load, y
+  ora #$80
+  jmp loadnosel_cont
+loadnosel:
+  lda ts_load, y
+loadnosel_cont:
   sta $04c9, y
   dey
   bpl ts_writeload
 
-waitforkey:
-  jsr $ffe4
-  bne havekey
-havekey:
-
 rts  
 
-;=============
-ts_adjustcurrentitem:
-rts
- 
 ;==============
 
 ;;Constants

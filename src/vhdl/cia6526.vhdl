@@ -494,19 +494,19 @@ begin  -- behavioural
         case register_number is
 		  
 		  		------Write Extended Regs:
-				when x"10" => reg_timera(7 downto 0) <= fastio_wdata;
-				when x"11" => reg_timera_latch(7 downto 0) <= fastio_wdata; 
-				when x"12" => reg_timera(15 downto 8) <= fastio_wdata;
-				when x"13" => reg_timera_latch(15 downto 8) <= fastio_wdata;
+				--when x"10" => reg_timera(7 downto 0) <= fastio_wdata;
+				--when x"11" => reg_timera_latch(7 downto 0) <= fastio_wdata; 
+				--when x"12" => reg_timera(15 downto 8) <= fastio_wdata;
+				--when x"13" => reg_timera_latch(15 downto 8) <= fastio_wdata;
 				              --if reg_timera_start='0' then
                           ---- load timer value now (CIA datasheet, page 6)
                           --  reg_timera <= fastio_wdata & reg_timera_latch(7 downto 0);
                           --end if;
 				
-				when x"14" => reg_timerb(7 downto 0) <= fastio_wdata;
-				when x"15" => reg_timerb_latch(7 downto 0) <= fastio_wdata;
-				when x"16" => reg_timerb(15 downto 8) <= fastio_wdata;
-				when x"17" => reg_timerb_latch(15 downto 8) <= fastio_wdata;
+				--when x"14" => reg_timerb(7 downto 0) <= fastio_wdata;
+				--when x"15" => reg_timerb_latch(7 downto 0) <= fastio_wdata;
+				--when x"16" => reg_timerb(15 downto 8) <= fastio_wdata;
+				--when x"17" => reg_timerb_latch(15 downto 8) <= fastio_wdata;
 --				              if reg_timera_start='0' then
 --                          -- load timer value now 
 --								  -- How are we going to handle restoring of timers?
