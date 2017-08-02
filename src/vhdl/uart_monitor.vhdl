@@ -26,6 +26,9 @@ use work.version.all;
 
 entity uart_monitor is
   port (
+    protected_hardware_in : in unsigned(7 downto 0); 	 
+	 secure_mode_halt : in std_logic; 
+	 confirm_secure_exit : out std_logic; 
     reset : in std_logic;
     reset_out : out std_logic := '1';
     monitor_hyper_trap : out std_logic := '1';
@@ -33,7 +36,7 @@ entity uart_monitor is
     tx : out std_logic;
     rx : in  std_logic;
     activity : out std_logic;
-
+   
     key_scancode : out unsigned(15 downto 0);
     key_scancode_toggle : out std_logic;
 
@@ -160,6 +163,11 @@ architecture behavioural of uart_monitor is
     "--------------------------------" & crlf &
     "See source code for help." & crlf;
 
+
+constant secureModeMessage : String :=
+    crlf &
+    "Do you want to exit secure mode? Y/N" & crlf;
+
   -- iterator to iterate through each message,
   -- so each message/string should be no more than 256 chars.
   -- If you need more than 255 chars, have two strings as per HelpMessage-states
@@ -196,7 +204,9 @@ architecture behavioural of uart_monitor is
 
   constant registerMessage : string := crlf & "PC   A  X  Y  Z  B  SP   MAPL MAPH LAST-OP     P  P-FLAGS   RGP uS IO" & crlf;
   
-  type monitor_state is (Reseting,
+  type monitor_state is (SecureModeConfirm,
+                         Reseting,
+								 PrintSecModeExit, 
                          PrintBanner,
                          PrintError,PrintError2,PrintError3,PrintError4,
                          PrintRequestTimeoutError,
@@ -304,6 +314,7 @@ architecture behavioural of uart_monitor is
 
   signal show_register_delay : integer range 0 to 255;
   
+  signal secure_mode_ack : std_logic :='0'; 
 begin
 
   uart_tx0: UART_TX_CTRL
@@ -640,7 +651,11 @@ begin
     
   begin  -- process testclock
     if rising_edge(clock) then
-
+	 --Initiate secure mode dialog, 
+      if secure_mode_halt = '1' and secure_mode_ack='0' then
+		  state <= SecureModeConfirm;
+		end if;
+		
       if reset='0' then -- reset is asserted
 
         state <= Reseting;
@@ -762,7 +777,26 @@ begin
             when Reseting =>
               banner_position <= 1;
               state <= PrintBanner;
-              
+				
+				--Print a dialog for exiting secure mode.
+				when SecureModeConfirm =>  
+				  secure_mode_ack <= '1';  --acknowledge secure mode exit request, so it doesnt get stuck in this state. 
+				  banner_position <=1; --reset banner position
+				  state<=PrintSecModeExit;
+				  
+            when PrintSecModeExit =>
+              if tx_ready='1' then
+                tx_data <= to_std_logic_vector(secureModeMessage(banner_position));
+                tx_trigger <= '1';
+                if banner_position<secureModeMessage'length then
+                  banner_position <= banner_position + 1;
+                else
+                  state <= NextCommand;
+                  cmdlen <= 1; --not sure what this does?
+                end if;
+              end if;				 
+				 
+				 
             when PrintBanner =>
               if tx_ready='1' then
                 tx_data <= to_std_logic_vector(bannerMessage(banner_position));
@@ -774,7 +808,7 @@ begin
                   cmdlen <= 1;
                 end if;
               end if;
-              
+            				
             when PrintError =>
               if tx_ready='1' then
                 tx_data <= to_std_logic_vector(errorMessage(banner_position));
@@ -891,6 +925,9 @@ begin
               parse_position<=2; try_output_char(cr,EnterPressed2);
             when EnterPressed2 => try_output_char(lf,EnterPressed3);
             when EnterPressed3 =>
+				
+				--add if its in secure mode, don't accept these, only 'y' and 'n'.
+			--	if secure_mode_halt='0' then 
               if cmdlen>1 then              
                 if (cmdbuffer(1) = 'h' or cmdbuffer(1) = 'H' or cmdbuffer(1) = '?') then
                   banner_position <= 1;
@@ -1042,7 +1079,15 @@ begin
                 cmdlen <= 1;
                 state <= ShowRegisters;
               end if;
-              
+
+--else --when it is in secure mode 
+  --if cmdbuffer(1) = 'y' or cmdbuffer(1) = 'Y' then
+    -- assert confirm_secure_exit high 
+	 -- eventually something about memory? 
+  --elsif cmdbuffer(1) = 'n' or cmdbuffer(1) = 'N' then
+  
+  --end if; 
+--end if;              
             when CPUHistory =>
               history_record <= '0';
               history_address <= to_integer(hex_value(9 downto 0));

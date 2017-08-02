@@ -241,10 +241,11 @@ trap_entry_points:
 	jmp matrix_mode_toggle          ; Trap #$43 (matrix mode toggle)
 	nop				; refer: kickstart_task
 
-	jmp nosuchtrap			; common-trap (catch all)
+	jmp secure_mode			; Trap #44 (secure mode toggle)
+	nop			 	; refer: kickstart_task
+
+	jmp nosuchtrap                  ; common-trap (catch all)
 	nop				; refer: below in this file
-	jmp nosuchtrap
-	nop
 	jmp nosuchtrap
 	nop
 	jmp nosuchtrap

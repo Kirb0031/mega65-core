@@ -217,3 +217,13 @@ exitmm:
 	;sta $D020
 
 	sta hypervisor_enterexit_trigger
+
+
+; =======================
+
+
+secure_mode:
+
+
+	sta hypervisor_enterexit_trigger
+

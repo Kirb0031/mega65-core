@@ -43,6 +43,9 @@ entity gs4510 is
     nmi : in std_logic;
     hyper_trap : in std_logic;
 	 matrix_trap_in : in std_logic;
+	 secure_mode_halt : out std_logic;
+	 confirm_secure_exit : in std_logic; 
+	 
     protected_hardware : out unsigned(7 downto 0);	
 	 --Protected Hardware Bits
 	 --Bit 1: TBD
@@ -426,7 +429,11 @@ end component;
   signal hyper_map_high : std_logic_vector(3 downto 0);
   signal hyper_map_offset_low : unsigned(11 downto 0);
   signal hyper_map_offset_high : unsigned(11 downto 0);
-  signal hyper_protected_hardware : unsigned(7 downto 0); 
+  
+  -- secure mode
+  signal hyper_protected_hardware : unsigned(7 downto 0) := x"00"; 
+  signal secure_mode_halt_sig : std_logic :='0';
+  signal secure_exit_pending : std_logic; 
   
   -- Page table for virtual memory
   signal reg_page0_logical : unsigned(15 downto 0);
@@ -609,7 +616,7 @@ end component;
     VectorRead,
 
     -- Hypervisor traps
-    TrapToHypervisor,ReturnFromHypervisor,
+    TrapToHypervisor,ReturnFromHypervisor, TrapToSecureMode, ReturnFromSecureMode,ReturnFromSecureMode1,
     
     -- DMAgic
     DMAgicTrigger,DMAgicReadList,DMAgicGetReady,
@@ -1037,8 +1044,12 @@ constant mode_lut : mlut9bit := (
     
     others => ( mcInstructionFetch => '1', others => '0'));
 
+signal matrix_toggle : std_logic :='0'; 
 
 begin
+
+	 protected_hardware <= hyper_protected_hardware;
+
 
   shadowram0 : shadowram port map (
     clk     => clock,
@@ -1223,7 +1234,11 @@ begin
 
       -- CPU starts in hypervisor
       hypervisor_mode <= '1';
-      
+		
+		-- Not in secure mode
+      hyper_protected_hardware <=x"00";
+		secure_mode_halt <= '0'; 
+		
       instruction_phase <= x"0";
       
       -- Default register values
@@ -2438,16 +2453,29 @@ begin
     z_incremented <= reg_z + 1;
     z_decremented <= reg_z - 1;
     
-    -- BEGINNING OF MAIN PROCESS FOR CPU
+	 
+    -- BEGINNING OF MAIN PROCESS FOR CPU	 `
     if rising_edge(clock) then
 
+   --Removed alt-tab for matrix mode from hypervisor routines
+      if matrix_trap_in = '1' and matrix_toggle = '0' then 
+		  hyper_protected_hardware(6) <= not hyper_protected_hardware(6);
+		  matrix_toggle <= '1';
+		--protected_hardware(6) <= not hyper_protected_hardware(6);
+		elsif matrix_trap_in ='0' and matrix_toggle = '1' then
+		  matrix_toggle <= '0'; 
+		end if;
+		
+		
+
       --Check for system-generated traps (matrix mode, and double tap restore)
-      if (hyper_trap = '0' or matrix_trap_in ='1') and hyper_trap_state = '1' then
+      if hyper_trap = '0' and hyper_trap_state = '1' then
         hyper_trap_pending <= '1'; 
-        if matrix_trap_in='1' then 
-		    matrix_trap_pending <='1';
-		  end if;
+        --if matrix_trap_in='1' then 
+		  --  matrix_trap_pending <='1';
+		  --end if;
       end if;
+		
       hyper_trap_state <= hyper_trap;
               
       -- Select CPU personality based on IO mode, but hypervisor can override to
@@ -2698,7 +2726,7 @@ begin
  		  
 		  -- @IO:GS $D672 - Protected Hardware configuration 
 		  if last_write_address = x"FFD3672" and hypervisor_mode='1' then
-          hyper_protected_hardware(7 downto 0) <= last_value;
+          --hyper_protected_hardware(7 downto 0) <= last_value;
         end if; 
 
         -- @IO:GS $D67C.0-7 - (write) Hypervisor write serial output to UART monitor
@@ -2746,7 +2774,7 @@ begin
       slowram_request_toggle <= slowram_request_toggle_drive;
       slowram_addr_reflect_drive <= slowram_addr_reflect;
       slowram_datain_reflect_drive <= slowram_datain_reflect;
-		protected_hardware <= hyper_protected_hardware;      
+		--
       cpu_hypervisor_mode <= hypervisor_mode;
       
       slowram_addr <= slowram_addr_drive;
@@ -3264,6 +3292,20 @@ begin
                 monitor_mem_attention_granted <= '0';
                 state <= ProcessorHold;
               end if;
+				when TrapToSecureMode =>
+				  hyper_protected_hardware(7)<='1'; --enable secure mode
+				  state <= normal_fetch_state;
+            when ReturnFromSecureMode =>
+				  hyper_protected_hardware(6) <= '1'; --Enter matrix mode. 
+				  hyper_protected_hardware(7) <='0'; --disable secure mode (for now) 
+				  secure_mode_halt <= '1'; -- tell monitor CPU is halted, ready to exit secure mode. 
+              --if confirm_secure_exit = '1' then				    				 
+                state <= ReturnFromSecureMode1;
+				  --else --wait in this state
+				    --state <= ReturnFromSecureMode; 
+				  --end if;
+				when ReturnFromSecureMode1 =>
+				  state <= normal_fetch_state;
             when TrapToHypervisor =>
               -- Save all registers
               hyper_iomode(1 downto 0) <= unsigned(viciii_iomode);
@@ -3566,7 +3608,7 @@ begin
                 -- Make sure reg_instruction /= I_BRK, so that B flag is not
                 -- erroneously set.
                 reg_instruction <= I_SEI;
-              elsif (hyper_trap_pending = '1' and hypervisor_mode='0') then
+              elsif hyper_trap_pending = '1' and hypervisor_mode='0' and hyper_protected_hardware(7)='0' then
                 -- Trap to hypervisor
                 hyper_trap_pending <= '0';					 
                 state <= TrapToHypervisor;
@@ -5256,7 +5298,13 @@ begin
             hypervisor_trap_port(6) <= '0';
             if hypervisor_mode = '0' then
               report "HYPERTRAP: Hypervisor trap triggered by write to $D640-$D67F";
-              state <= TrapToHypervisor;
+              if hyper_protected_hardware(7) = '1' then
+				    state <= ReturnFromSecureMode; --If Secure Mode is activated, any trap to hypervisor will exit secure mode				  	
+				  elsif memory_access_address(5 downto 0) = x"3F" and hyper_protected_hardware(7)='0' then -- If userland trap 04 ($d644) is written to, enable secure mode. 
+				    state <= TrapToSecureMode; 
+				  else
+				    state <= TrapToHypervisor;
+				  end if;
             end if;
             if hypervisor_mode = '1'
               and memory_access_address(5 downto 0) = "111111" then

@@ -42,7 +42,7 @@ entity ps2_to_uart is
     tx_ps2 : out STD_LOGIC;
 	 display_shift_out : out std_logic_vector(2 downto 0);
 	 shift_ready_out : out std_logic;
-	 matrix_trap_out : out std_logic;
+	 matrix_trap_out : out std_logic:='0';
 	 shift_ack_in : in std_logic	 
   );
 end ps2_to_uart;
