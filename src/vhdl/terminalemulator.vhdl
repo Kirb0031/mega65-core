@@ -57,7 +57,7 @@ component uart_rx is
   );
 end component; 
 
-type terminal_emulator_state is (clearAck,
+type terminal_emulator_state is (clearAck,clearScreen,
                                  incChar,
                                  writeChar, writeChar2,
                                  waitforinput,
@@ -87,6 +87,7 @@ signal clearLineEnd : std_logic_vector(11 downto 0):=CharMemStart+80;
 signal topofframe : std_logic_vector(11 downto 0):=CharMemStart;--(others=>'0'); --position of topofframe in memory. Ring buffer
 --has the characters hit the bottom of the frame for the first time? If so always scroll text up on next line.
 signal hasHitEoF : std_logic:='0'; 
+signal escCmd : std_logic :='0'; --was last char esc? 
 begin
 
 uart_rx0: uart_rx 
@@ -116,11 +117,18 @@ topofframe_out <= topOfFrame;--b"000000000000";--topOfFrame;
 					else
 					  state<=clearCursor; --Clear character (for LF no CR, on Syntax Errors)
 				     next_state<=processCommand;
-					end if;
-				  
-			   else 			 
-			     state<=writeChar;
-				  dataToWrite<=rx_data-32;
+					end if;				
+			   else 
+              if escCmd='1' then 
+				    if rx_data = x"63" then 
+					   clearLineStart <= CharMemStart; --set the clearing from start of character memory
+					   state<=clearScreen; 
+						escCmd <= '0'; 
+					 end if;
+              else
+			       state<=writeChar;
+				    dataToWrite<=rx_data-32;
+				  end if;				  
             end if;
          --else
            --state<=writeCursor;
@@ -206,9 +214,41 @@ topofframe_out <= topOfFrame;--b"000000000000";--topOfFrame;
 		when newLine2=>  
 		  next_state<=clearAck;
 		  state<=clearLine;
-		  
-		when processCommand =>        	
-		  if rx_data = x"0D" then --CR carriage return		  
+      
+      when clearScreen =>
+		--Wipe ALL screen memory and set everything to charMemStart.
+		   wel_out<=b"1";		
+		   addrl_out<=clearLineStart;
+         dinl_out<=(others=>'0');
+		   clearLineStart<=clearLineStart+1;
+	
+         if (clearLineStart=CharMemEnd) then
+           hasHitEoF <= '0';			
+			  lastLineStart <= CharMemStart;
+			  clearLineStart <= CharMemStart;
+			  clearLineEnd <= CharMemStart+80;
+			  topofframe <= CharMemStart;
+			  charX<=(others=>'0');
+			  charCursor <= CharMemStart;			  			  
+			  wel_out<=b"0";
+			  state<=clearAck;         
+			end if;				
+
+--signal charCursor : std_logic_vector(11 downto 0):=CharMemStart; --0 to 3199 char positions
+--signal charX : std_logic_vector(7 downto 0):=x"00";--50 --execute on first run
+--signal lastLineStart : std_logic_vector(11 downto 0):=CharMemStart; --0 to 3199 char positions
+--signal clearLineStart : std_logic_vector(11 downto 0):=CharMemStart;
+--signal clearLineEnd : std_logic_vector(11 downto 0):=CharMemStart+80;
+--signal topofframe : std_logic_vector(11 downto 0):=CharMemStart;
+
+
+      --state<=clearAck;
+		
+		when processCommand =>
+        if rx_data = x"1B" then --esc
+		    escCmd<='1'; 
+          state<=clearAck;		  
+		  elsif rx_data = x"0D" then --CR carriage return		  
           charCursor<=lastLineStart; --go back to start of line?
 			 charX<=(others=>'0');
 			 state<=clearAck;	
@@ -223,8 +263,7 @@ topofframe_out <= topOfFrame;--b"000000000000";--topOfFrame;
 			 wel_out<=b"1";			 
 			 --state<=backspace;
 			 state<=writeCursor;
-			 next_state<=clearAck;
-			 
+			 next_state<=clearAck;			 
 		  else 
 		    state<=clearAck;
 		  end if;
@@ -236,9 +275,9 @@ topofframe_out <= topOfFrame;--b"000000000000";--topOfFrame;
 		  
        --Clear acknowledge, ready for next Char
        when clearAck=>
-		 wel_out<=b"0";
-       rx_acknowledge<='0';	 
-		 state<=waitforinput;
+		   wel_out<=b"0";
+         rx_acknowledge<='0';	 
+		   state<=waitforinput;
 
 		  
 		when linefeed=>

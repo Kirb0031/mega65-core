@@ -204,7 +204,7 @@ constant secureModeMessage : String :=
 
   constant registerMessage : string := crlf & "PC   A  X  Y  Z  B  SP   MAPL MAPH LAST-OP     P  P-FLAGS   RGP uS IO" & crlf;
   
-  type monitor_state is (SecureModeConfirm,
+  type monitor_state is (SecureModeConfirm, ClearScreen,ClearScreen1,
                          Reseting,
 								 PrintSecModeExit, 
                          PrintBanner,
@@ -379,7 +379,10 @@ begin
       else
         -- Non-printable character, for now print ?
         case key_state is
-
+          when 5 =>
+			   key_state<=0; 
+				state <= ClearScreen;
+				
           -- Remote keyboard
           when 3 =>
             key_scancode(7 downto 0) <= unsigned(to_std_logic_vector(char));
@@ -410,6 +413,7 @@ begin
             case char is
               when '[' => key_state<=2; -- cursor movement etc
               when 'K' => key_state <= 3; -- ESC-K-scanlo-scanhi for remote keyboard
+				  when 'c' => key_state <= 5; -- esc-c for clear
               when others => key_state<=0;
             end case;
 
@@ -777,6 +781,14 @@ begin
             when Reseting =>
               banner_position <= 1;
               state <= PrintBanner;
+				
+				-- clear screen / reset terminal (echo command esc-c) 
+				when ClearScreen =>
+				try_output_char(esc, ClearScreen1);
+				
+				when ClearScreen1 => 
+				try_output_char('c', NextCommand);
+				
 				
 				--Print a dialog for exiting secure mode.
 				when SecureModeConfirm =>  
