@@ -222,8 +222,3 @@ exitmm:
 ; =======================
 
 
-secure_mode:
-
-
-	sta hypervisor_enterexit_trigger
-

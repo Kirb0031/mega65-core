@@ -164,9 +164,12 @@ architecture behavioural of uart_monitor is
     "See source code for help." & crlf;
 
 
-constant secureModeMessage : String :=
+constant secureExitMessage : String :=
     crlf &
-    "Do you want to exit secure mode? Y/N" & crlf;
+    "Do you want to exit secure mode? Accept/Decline" & crlf;	 
+	 
+constant secureEnterMessage : String :=
+    crlf & "Secure Service Requested by program." & crlf & " Accept/Decline" & crlf;
 
   -- iterator to iterate through each message,
   -- so each message/string should be no more than 256 chars.
@@ -379,9 +382,11 @@ begin
       else
         -- Non-printable character, for now print ?
         case key_state is
-          when 5 =>
-			   key_state<=0; 
-				state <= ClearScreen;
+		  
+		  
+          --when 5 => --don't actually need a keystate for this, fixes neeeding another key press to clear
+			  -- key_state<=0; 
+				--state <= ClearScreen;
 				
           -- Remote keyboard
           when 3 =>
@@ -413,7 +418,9 @@ begin
             case char is
               when '[' => key_state<=2; -- cursor movement etc
               when 'K' => key_state <= 3; -- ESC-K-scanlo-scanhi for remote keyboard
-				  when 'c' => key_state <= 5; -- esc-c for clear
+				  when 'c' => 
+				    key_state <= 0; -- esc-c for clear
+				    state <= ClearScreen; 
               when others => key_state<=0;
             end case;
 
@@ -798,9 +805,9 @@ begin
 				  
             when PrintSecModeExit =>
               if tx_ready='1' then
-                tx_data <= to_std_logic_vector(secureModeMessage(banner_position));
+                tx_data <= to_std_logic_vector(secureExitMessage(banner_position));
                 tx_trigger <= '1';
-                if banner_position<secureModeMessage'length then
+                if banner_position<secureExitMessage'length then
                   banner_position <= banner_position + 1;
                 else
                   state <= NextCommand;

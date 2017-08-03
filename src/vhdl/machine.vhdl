@@ -181,6 +181,7 @@ architecture Behavioral of machine is
 
   component compositor is
     port (
+	 	protected_hardware_in : in unsigned(7 downto 0); 
 	   display_shift_in : in std_logic_vector(2 downto 0);
 	   shift_ready_in : in std_logic;
 	   shift_ack_out : out std_logic;
@@ -1249,6 +1250,7 @@ begin
     ); 
 
   compositor0 : compositor port map(
+  	 protected_hardware_in => protected_hardware_sig,
     display_shift_in=>display_shift,
 	 shift_ready_in => shift_ready,
 	 shift_ack_out => shift_ack,

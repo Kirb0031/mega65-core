@@ -6,6 +6,7 @@ use ieee.std_logic_unsigned.all;
 
 entity compositor is
   Port (
+	 protected_hardware_in : in unsigned(7 downto 0); 
     display_shift_in : in std_logic_vector(2 downto 0);
 	 shift_ready_in : in std_logic;
 	 shift_ack_out : out std_logic;
