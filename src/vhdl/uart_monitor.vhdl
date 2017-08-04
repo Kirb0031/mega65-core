@@ -27,8 +27,9 @@ use work.version.all;
 entity uart_monitor is
   port (
     protected_hardware_in : in unsigned(7 downto 0); 	 
-	 secure_mode_halt : in std_logic; 
-	 confirm_secure_exit : out std_logic; 
+	 secure_mode_halt : in std_logic; --not needed anymore?
+	 secure_mode_request : in std_logic_vector(1 downto 0); --SM Request 01 = enter 10 = exit, 00/11 idle no sm request. 
+	 confirm_secure : out std_logic_vector(1 downto 0); -- after SM request confirm exit mode, 01 Accept, 10 decline 00/11 idle
     reset : in std_logic;
     reset_out : out std_logic := '1';
     monitor_hyper_trap : out std_logic := '1';
@@ -167,8 +168,8 @@ architecture behavioural of uart_monitor is
 constant secureExitMessage : String :=
     crlf &
     "Do you want to exit secure mode? Accept/Decline" & crlf;	 
-	 
-constant secureEnterMessage : String :=
+	 	 
+constant secureEntryMessage : String :=
     crlf & "Secure Service Requested by program." & crlf & " Accept/Decline" & crlf;
 
   -- iterator to iterate through each message,
@@ -207,9 +208,9 @@ constant secureEnterMessage : String :=
 
   constant registerMessage : string := crlf & "PC   A  X  Y  Z  B  SP   MAPL MAPH LAST-OP     P  P-FLAGS   RGP uS IO" & crlf;
   
-  type monitor_state is (SecureModeConfirm, ClearScreen,ClearScreen1,
+  type monitor_state is (SecureModeConfirm,SecureModeConfirm1, ClearScreen,ClearScreen1,
                          Reseting,
-								 PrintSecModeExit, 
+								 PrintSecModeEntry,PrintSecModeExit, 
                          PrintBanner,
                          PrintError,PrintError2,PrintError3,PrintError4,
                          PrintRequestTimeoutError,
@@ -421,6 +422,7 @@ begin
 				  when 'c' => 
 				    key_state <= 0; -- esc-c for clear
 				    state <= ClearScreen; 
+					 success_state <= NextCommand;
               when others => key_state<=0;
             end case;
 
@@ -494,6 +496,23 @@ begin
         state <= next_state;
       end if;
     end try_output_char;
+
+
+--    procedure clear_screen(
+--	 step : in unsigned;
+--	 next_state : in monitor_state) is
+--	 begin 
+--	 if step = '0' then
+--	   try_output_char(esc, ClearScreen);	 
+--	 else
+--	   try_output_char(c, next_state);
+--	 end clear_screen;
+	 
+--	 when ClearScreen =>
+--				try_output_char(esc, ClearScreen1);
+--				
+--				when ClearScreen1 => 
+--				try_output_char('c', NextCommand);
 
     -- purpose: output a hex string
     procedure print_hex (
@@ -663,7 +682,7 @@ begin
   begin  -- process testclock
     if rising_edge(clock) then
 	 --Initiate secure mode dialog, 
-      if secure_mode_halt = '1' and secure_mode_ack='0' then
+      if secure_mode_request = "01" and secure_mode_ack='0' then
 		  state <= SecureModeConfirm;
 		end if;
 		
@@ -789,19 +808,41 @@ begin
               banner_position <= 1;
               state <= PrintBanner;
 				
-				-- clear screen / reset terminal (echo command esc-c) 
+				-- clear screen / reset terminal (echo command esc-c)
+				-- Set success_state before calling clear screen
 				when ClearScreen =>
 				try_output_char(esc, ClearScreen1);
 				
 				when ClearScreen1 => 
-				try_output_char('c', NextCommand);
+				try_output_char('c', success_state);
 				
 				
-				--Print a dialog for exiting secure mode.
+				--Print a dialog for entry/exiting secure mode.
 				when SecureModeConfirm =>  
 				  secure_mode_ack <= '1';  --acknowledge secure mode exit request, so it doesnt get stuck in this state. 
+				  state <= ClearScreen; --Clear screen before displaying message
+				  success_state <= SecureModeConfirm1;
+				  
+				when SecureModeConfirm1 =>  
 				  banner_position <=1; --reset banner position
-				  state<=PrintSecModeExit;
+				  if secure_mode_request = "01" then
+				    state<=PrintSecModeEntry;
+				  elsif secure_mode_request = "10" then
+           	    state<=PrintSecModeExit;
+              end if;
+				  
+				  
+            when PrintSecModeEntry =>
+               if tx_ready='1' then
+                tx_data <= to_std_logic_vector(secureEntryMessage(banner_position));
+                tx_trigger <= '1';
+                if banner_position<secureEntryMessage'length then
+                  banner_position <= banner_position + 1;
+                else
+                  state <= NextCommand;
+                  cmdlen <= 1; --not sure what this does?
+                end if;
+              end if;	
 				  
             when PrintSecModeExit =>
               if tx_ready='1' then

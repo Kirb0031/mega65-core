@@ -220,7 +220,8 @@ architecture Behavioral of machine is
     port (
 	 protected_hardware_in : in unsigned(7 downto 0); 
 	 secure_mode_halt : in std_logic; 
-	 confirm_secure_exit : out std_logic; 
+	 secure_mode_request : in std_logic_vector(1 downto 0);
+	 confirm_secure : out std_logic_vector(1 downto 0); 
     reset : in std_logic;
     reset_out : out std_logic;
     monitor_hyper_trap : out std_logic := '1';
@@ -285,7 +286,8 @@ architecture Behavioral of machine is
   component gs4510
     port (
 	   protected_hardware : out unsigned(7 downto 0);
-		confirm_secure_exit : in std_logic; 
+	   secure_mode_request : in std_logic_vector(1 downto 0);
+	   confirm_secure : out std_logic_vector(1 downto 0); 
       Clock : in std_logic;
       ioclock : in std_logic;
       reset : in std_logic;
@@ -294,6 +296,7 @@ architecture Behavioral of machine is
       hyper_trap : in std_logic;
       cpu_hypervisor_mode : out std_logic;
  	   secure_mode_halt : out std_logic;
+		
       matrix_trap_in : in std_logic;
       cpuis6502 : out std_logic;
       cpuspeed : out unsigned(7 downto 0);
@@ -759,7 +762,7 @@ architecture Behavioral of machine is
   signal uart_rx_buffer : std_logic;
   signal protected_hardware_sig : unsigned(7 downto 0);
   signal secure_mode_halt_sig : std_logic;
-  signal confirm_secure_exit_sig : std_logic;
+  signal confirm_secure_sig : std_logic_vector(1 downto 0):="00";
 
   -- Matrix Mode signals
   signal scancode_out : std_logic_vector(12 downto 0); 
@@ -951,7 +954,7 @@ begin
     matrix_trap_in=>matrix_trap,
 	 secure_mode_halt => secure_mode_halt_sig,
     protected_hardware => protected_hardware_sig,
-	 confirm_secure_exit => confirm_secure_exit_sig,
+	 confirm_secure => confirm_secure_sig,
     clock => cpuclock,
     ioclock => ioclock,
     reset =>reset_combined,
@@ -1275,7 +1278,7 @@ begin
   monitor0 : uart_monitor port map (
     protected_hardware_in => protected_hardware_sig,
 	 secure_mode_halt => secure_mode_halt_sig,
-	 confirm_secure_exit => confirm_secure_exit_sig,
+	 confirm_secure => confirm_secure_sig,
     reset => reset_combined,
     reset_out => reset_monitor,
     monitor_hyper_trap => monitor_hyper_trap,

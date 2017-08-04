@@ -44,8 +44,9 @@ entity gs4510 is
     hyper_trap : in std_logic;
 	 matrix_trap_in : in std_logic;
 	 secure_mode_halt : out std_logic;
-	 confirm_secure_exit : in std_logic; 
-	 
+	 secure_mode_request : in std_logic_vector(1 downto 0);
+	 confirm_secure : out std_logic_vector(1 downto 0); 
+
     protected_hardware : out unsigned(7 downto 0);	
 	 --Protected Hardware Bits
 	 --Bit 1: TBD
@@ -433,7 +434,9 @@ end component;
   -- secure mode
   signal hyper_protected_hardware : unsigned(7 downto 0) := x"00"; 
   signal secure_mode_halt_sig : std_logic :='0';
-  signal secure_exit_pending : std_logic; 
+  signal secure_exit_pending : std_logic;
+  signal transfer_size : unsigned(7 downto 0) :=x"00"; -- number of KB of transfer area. 
+  --signal secure_mode_request : std_logic :='0';  
   
   -- Page table for virtual memory
   signal reg_page0_logical : unsigned(15 downto 0);
@@ -616,7 +619,7 @@ end component;
     VectorRead,
 
     -- Hypervisor traps
-    TrapToHypervisor,ReturnFromHypervisor, TrapToSecureMode, ReturnFromSecureMode,ReturnFromSecureMode1,
+    TrapToHypervisor,ReturnFromHypervisor, EnterSecureMode,EnterSecureMode1, ReturnFromSecureMode,ReturnFromSecureMode1,
     
     -- DMAgic
     DMAgicTrigger,DMAgicReadList,DMAgicGetReady,
@@ -1237,7 +1240,7 @@ begin
 		
 		-- Not in secure mode
       hyper_protected_hardware <=x"00";
-		secure_mode_halt <= '0'; 
+		secure_mode_halt <= '0'; 		
 		
       instruction_phase <= x"0";
       
@@ -2725,8 +2728,9 @@ begin
         end if;   
  		  
 		  -- @IO:GS $D672 - Protected Hardware configuration 
-		  if last_write_address = x"FFD3672" and hypervisor_mode='1' then
+		  if last_write_address = x"FFD3672" and hypervisor_mode='0' then
           --hyper_protected_hardware(7 downto 0) <= last_value;
+			
         end if; 
 
         -- @IO:GS $D67C.0-7 - (write) Hypervisor write serial output to UART monitor
@@ -3292,20 +3296,48 @@ begin
                 monitor_mem_attention_granted <= '0';
                 state <= ProcessorHold;
               end if;
-				when TrapToSecureMode =>
+				  
+				when EnterSecureMode => --When $D672 is written
 				  hyper_protected_hardware(7)<='1'; --enable secure mode
-				  state <= normal_fetch_state;
+				  hyper_protected_hardware(6)<='1'; --enable matrix mode
+				  secure_mode_request <= "01"; -- request secure mode entry 		
+				  --todo: Set PC to $8000 mapped to $24000				  
+				  reg_pc <= x"8000";
+				  
+				  state <= EnterSecureMode1;
+				  
+				when EnterSecureMode1 =>
+				 --wait for confirmation
+				 if confirm_secure = "01" then --accept
+				   hyper_protected_hardware(7)<='1'; --enable secure mode
+               secure_mode_request <="00"; -- de-assert secure request
+				 elsif confirm_secure = "10" then --decline secure mode				 
+				   -- End secure mode
+				   -- Hypervisor reloads non-transfer memory for user program
+					-- No memory wipe needed (nothing created in secure mode)
+					state <= TrapToHypervisor;
+					hyper_protected_hardware(7)<='0'; 
+					hypervisor_trap_port <= "1000100"; --44
+					secure_mode_request <="00"; -- de-assert secure request
+				 end if;
+				 --otherwise hold in this state until accept or decline
+				 
             when ReturnFromSecureMode =>
 				  hyper_protected_hardware(6) <= '1'; --Enter matrix mode. 
 				  hyper_protected_hardware(7) <='0'; --disable secure mode (for now) 
-				  secure_mode_halt <= '1'; -- tell monitor CPU is halted, ready to exit secure mode. 
-              --if confirm_secure_exit = '1' then				    				 
-                state <= ReturnFromSecureMode1;
-				  --else --wait in this state
-				    --state <= ReturnFromSecureMode; 
-				  --end if;
-				when ReturnFromSecureMode1 =>
-				  state <= normal_fetch_state;
+				  secure_mode_request <= "10"; -- Request Exit secure mode
+              state <= ReturnFromSecureMode1;
+				  
+				when ReturnFromSecureMode1 =>				
+				 if confirm_secure = "01" then --accept
+					state <= TrapToHypervisor;
+					hyper_protected_hardware(7)<='0'; 
+					hypervisor_trap_port <= "1000100"; --44
+					secure_mode_request <="00"; -- de-assert secure request
+				 elsif confirm_secure = "10" then --decline secure mode				 
+				   --Wipe all memory, End secure mode?
+				 end if;
+
             when TrapToHypervisor =>
               -- Save all registers
               hyper_iomode(1 downto 0) <= unsigned(viciii_iomode);
@@ -5300,8 +5332,8 @@ begin
               report "HYPERTRAP: Hypervisor trap triggered by write to $D640-$D67F";
               if hyper_protected_hardware(7) = '1' then
 				    state <= ReturnFromSecureMode; --If Secure Mode is activated, any trap to hypervisor will exit secure mode				  	
-				  elsif memory_access_address(5 downto 0) = x"3F" and hyper_protected_hardware(7)='0' then -- If userland trap 04 ($d644) is written to, enable secure mode. 
-				    state <= TrapToSecureMode; 
+				  --elsif memory_access_address(5 downto 0) = x"3F" and hyper_protected_hardware(7)='0' then -- If userland trap 04 ($d644) is written to, enable secure mode. 
+				  --  state <= TrapToSecureMode; 
 				  else
 				    state <= TrapToHypervisor;
 				  end if;
@@ -5312,6 +5344,14 @@ begin
               report "           irq_pending = " & std_logic'image(irq_pending);
               report "           nmi_pending = " & std_logic'image(nmi_pending);
               state <= ReturnFromHypervisor;
+				
+				--Entering secure mode, if currently in hypervisor mode and $D672 is written to and also ISNT already in secure mode (which should never happen)
+				elsif hypervisor_mode ='1' and memory_access_address(5 downto 0) = "110010" and hyper_protected_hardware(7)='0' then   
+				  --secure_mode_request <= "01"; -- request secure mode entry 				  
+				  state<= EnterSecureMode;
+				elsif hypervisor_mode ='0' and memory_access_address(5 downto 0) = "110010" and hyper_protected_hardware(7)='1' then   
+ 			     secure_mode_request <= "10"; -- request secure mode exit
+				  transfer_size <= memory_access_wdata; -- save the transfer size area. 
             end if;
             -- Don't increment PC if we were otherwise going to shortcut to
             -- InstructionDecode next cycle

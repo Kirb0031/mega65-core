@@ -176,8 +176,8 @@ double_restore_trap:
 protected_hardware_config:
 
         ; store config info passed from register a 
-        lda hypervisor_a
-	sta $D672
+        ; lda hypervisor_a
+	; sta $D672
 
 	; bump border colour so that we know something has happened
 	;
@@ -187,7 +187,8 @@ protected_hardware_config:
 	and #$0f
 	sta $D020
 		
-	sta hypervisor_enterexit_trigger
+        sta hypervisor_enterexit_trigger
+	;;sta $D672 ;write to $D672 to exit 
 
 ;	========================
 
@@ -220,5 +221,10 @@ exitmm:
 
 
 ; =======================
+
+secure_mode_has_exit:
+; Executes when secure mode exits
+sta hypervisor_enterexit_trigger
+
 
 
