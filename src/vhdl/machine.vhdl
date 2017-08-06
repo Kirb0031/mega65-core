@@ -286,8 +286,8 @@ architecture Behavioral of machine is
   component gs4510
     port (
 	   protected_hardware : out unsigned(7 downto 0);
-	   secure_mode_request : in std_logic_vector(1 downto 0);
-	   confirm_secure : out std_logic_vector(1 downto 0); 
+	   secure_mode_request : out std_logic_vector(1 downto 0);
+	   confirm_secure : in std_logic_vector(1 downto 0); 
       Clock : in std_logic;
       ioclock : in std_logic;
       reset : in std_logic;

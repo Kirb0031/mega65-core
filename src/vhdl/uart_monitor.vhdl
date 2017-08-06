@@ -29,7 +29,7 @@ entity uart_monitor is
     protected_hardware_in : in unsigned(7 downto 0); 	 
 	 secure_mode_halt : in std_logic; --not needed anymore?
 	 secure_mode_request : in std_logic_vector(1 downto 0); --SM Request 01 = enter 10 = exit, 00/11 idle no sm request. 
-	 confirm_secure : out std_logic_vector(1 downto 0); -- after SM request confirm exit mode, 01 Accept, 10 decline 00/11 idle
+	 confirm_secure : out std_logic_vector(1 downto 0):="00"; -- after SM request confirm exit mode, 01 Accept, 10 decline 00/11 idle
     reset : in std_logic;
     reset_out : out std_logic := '1';
     monitor_hyper_trap : out std_logic := '1';
@@ -167,7 +167,8 @@ architecture behavioural of uart_monitor is
 
 constant secureExitMessage : String :=
     crlf &
-    "Do you want to exit secure mode? Accept/Decline" & crlf;	 
+    "Do you want to exit secure mode? Accept/Decline" & crlf
+	 & "Press F1/F2 to scroll through memory";	 
 	 	 
 constant secureEntryMessage : String :=
     crlf & "Secure Service Requested by program." & crlf & " Accept/Decline" & crlf;
@@ -682,7 +683,7 @@ begin
   begin  -- process testclock
     if rising_edge(clock) then
 	 --Initiate secure mode dialog, 
-      if secure_mode_request = "01" and secure_mode_ack='0' then
+      if (secure_mode_request = "01" or secure_mode_request = "01") and secure_mode_ack='0' then
 		  state <= SecureModeConfirm;
 		end if;
 		
@@ -826,7 +827,7 @@ begin
 				when SecureModeConfirm1 =>  
 				  banner_position <=1; --reset banner position
 				  if secure_mode_request = "01" then
-				    state<=PrintSecModeEntry;
+				    state<=PrintSecModeEntry;					 
 				  elsif secure_mode_request = "10" then
            	    state<=PrintSecModeExit;
               end if;
@@ -992,6 +993,10 @@ begin
                 if (cmdbuffer(1) = 'h' or cmdbuffer(1) = 'H' or cmdbuffer(1) = '?') then
                   banner_position <= 1;
                   state <= PrintBanner;
+					 elsif cmdbuffer(6 downto 1) = "accept" and secure_mode_request(0)/=secure_mode_request(1) then
+					   confirm_secure <= "01"; --accept
+					 elsif cmdbuffer(6 downto 1) = "reject" and secure_mode_request(0)/=secure_mode_request(1) then
+                  confirm_secure <= "10"; --reject
                 elsif cmdbuffer(1) = 'c' or cmdbuffer(1) = 'C' then
                   print_hex("000000"&monitor_char_toggle&monitor_char_toggle_last&monitor_char&monitor_char_count,7,NextCommand);
                 elsif cmdbuffer(1) = 's' or cmdbuffer(1) = 'S' then

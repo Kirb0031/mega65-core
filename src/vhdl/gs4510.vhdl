@@ -44,8 +44,8 @@ entity gs4510 is
     hyper_trap : in std_logic;
 	 matrix_trap_in : in std_logic;
 	 secure_mode_halt : out std_logic;
-	 secure_mode_request : in std_logic_vector(1 downto 0);
-	 confirm_secure : out std_logic_vector(1 downto 0); 
+	 secure_mode_request : out std_logic_vector(1 downto 0);
+	 confirm_secure : in std_logic_vector(1 downto 0); 
 
     protected_hardware : out unsigned(7 downto 0);	
 	 --Protected Hardware Bits
@@ -618,8 +618,13 @@ end component;
     Interrupt,InterruptPushPCL,InterruptPushP,
     VectorRead,
 
+    -- Secure mode related states
+	 EnterSecureMode,EnterSecureMode1, ReturnFromSecureMode,ReturnFromSecureMode1,
+	 WipeAllMem, WipeNonTransfer,
+
+
     -- Hypervisor traps
-    TrapToHypervisor,ReturnFromHypervisor, EnterSecureMode,EnterSecureMode1, ReturnFromSecureMode,ReturnFromSecureMode1,
+    TrapToHypervisor,ReturnFromHypervisor, 
     
     -- DMAgic
     DMAgicTrigger,DMAgicReadList,DMAgicGetReady,
@@ -3301,9 +3306,6 @@ begin
 				  hyper_protected_hardware(7)<='1'; --enable secure mode
 				  hyper_protected_hardware(6)<='1'; --enable matrix mode
 				  secure_mode_request <= "01"; -- request secure mode entry 		
-				  --todo: Set PC to $8000 mapped to $24000				  
-				  reg_pc <= x"8000";
-				  
 				  state <= EnterSecureMode1;
 				  
 				when EnterSecureMode1 =>
@@ -3311,6 +3313,15 @@ begin
 				 if confirm_secure = "01" then --accept
 				   hyper_protected_hardware(7)<='1'; --enable secure mode
                secure_mode_request <="00"; -- de-assert secure request
+              --Set PC to $8000 mapped to $24000				  
+				  reg_pc <= x"8000";
+				  reg_mb_low <= x"00";
+				  reg_mb_high <= x"00"; 
+				  reg_map_low <= "0000";
+				  reg_map_high <= "0001"; --Block 4 mapped
+				  reg_offset_low <= x"000";
+				  reg_offset_high <=x"160"; --24000-8000 = 16000
+
 				 elsif confirm_secure = "10" then --decline secure mode				 
 				   -- End secure mode
 				   -- Hypervisor reloads non-transfer memory for user program
@@ -3336,6 +3347,8 @@ begin
 					secure_mode_request <="00"; -- de-assert secure request
 				 elsif confirm_secure = "10" then --decline secure mode				 
 				   --Wipe all memory, End secure mode?
+					secure_mode_request <="00"; -- de-assert secure request
+               state <= normal_fetch_state;
 				 end if;
 
             when TrapToHypervisor =>
