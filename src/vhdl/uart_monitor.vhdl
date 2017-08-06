@@ -167,11 +167,11 @@ architecture behavioural of uart_monitor is
 
 constant secureExitMessage : String :=
     crlf &
-    "Do you want to exit secure mode? Accept/Decline" & crlf
+    "Do you want to exit secure mode? accept/reject" & crlf
 	 & "Press F1/F2 to scroll through memory";	 
 	 	 
 constant secureEntryMessage : String :=
-    crlf & "Secure Service Requested by program." & crlf & " Accept/Decline" & crlf;
+    crlf & "Secure Service Requested by program." & crlf & " accept/reject" & crlf;
 
   -- iterator to iterate through each message,
   -- so each message/string should be no more than 256 chars.
@@ -423,7 +423,13 @@ begin
 				  when 'c' => 
 				    key_state <= 0; -- esc-c for clear
 				    state <= ClearScreen; 
-					 success_state <= NextCommand;
+					 
+					 --If esc-c is pressed when theres a secure request pending, re-print banner
+					 if secure_mode_request(0)/=secure_mode_request(1) then
+					   success_state <= SecureModeConfirm1; 
+					 else
+					   success_state <= NextCommand;
+					 end if; 
               when others => key_state<=0;
             end case;
 
@@ -814,7 +820,7 @@ begin
 				when ClearScreen =>
 				try_output_char(esc, ClearScreen1);
 				
-				when ClearScreen1 => 
+				when ClearScreen1 =>            
 				try_output_char('c', success_state);
 				
 				
@@ -987,12 +993,11 @@ begin
             when EnterPressed2 => try_output_char(lf,EnterPressed3);
             when EnterPressed3 =>
 				
-				--add if its in secure mode, don't accept these, only 'y' and 'n'.
-			--	if secure_mode_halt='0' then 
               if cmdlen>1 then              
                 if (cmdbuffer(1) = 'h' or cmdbuffer(1) = 'H' or cmdbuffer(1) = '?') then
                   banner_position <= 1;
                   state <= PrintBanner;
+				    -- Only process accept/reject if secure mode request is pending, i.e. secure_mode_request is either x01 or x10
 					 elsif cmdbuffer(6 downto 1) = "accept" and secure_mode_request(0)/=secure_mode_request(1) then
 					   confirm_secure <= "01"; --accept
 					 elsif cmdbuffer(6 downto 1) = "reject" and secure_mode_request(0)/=secure_mode_request(1) then
