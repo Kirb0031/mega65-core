@@ -347,7 +347,7 @@ architecture Behavioral of machine is
   signal farcallstack_dout : std_logic_vector(63 downto 0);
   signal uart_tx_buffer : std_logic; 
   signal uart_rx_buffer : std_logic;
-  signal protected_hardware_sig : unsigned(7 downto 0);
+  signal protected_hardware_sig : unsigned(7 downto 0);  
 
   -- Matrix Mode signals
   signal scancode_out : std_logic_vector(12 downto 0); 
@@ -370,6 +370,8 @@ architecture Behavioral of machine is
   signal monitor_char_out : unsigned(7 downto 0);
   signal monitor_char_out_valid : std_logic := '0';
   signal terminal_emulator_ready : std_logic := '0';
+  signal secure_request : std_logic_vector(1 downto 0):="00";
+  signal secure_confirm : std_logic_vecotr(1 downto 0):="00"; 
 
 begin
 
@@ -549,6 +551,8 @@ begin
     generic map(
       cpufrequency => cpufrequency)
     port map(
+	   secure_request_out => secure_request,
+		secure_confirm_in => secure_confirm,
       matrix_trap_in=>matrix_trap,
       protected_hardware => protected_hardware_sig,
       clock => cpuclock,
@@ -915,6 +919,8 @@ begin
     rx       => RsRx,
     bit_rate_divisor => bit_rate_divisor,
 
+    secure_request_in => secure_request,
+    secure_confirm_out => secure_confirm,
     protected_hardware_in => protected_hardware_sig,
     -- ASCII key from keyboard_complex for feeding UART monitor interface
     -- when using local keyboard

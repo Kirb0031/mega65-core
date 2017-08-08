@@ -52,7 +52,9 @@ entity gs4510 is
     matrix_trap_in : in std_logic;
     hyper_trap_f011_read : in std_logic;
     hyper_trap_f011_write : in std_logic;
-    protected_hardware : out unsigned(7 downto 0);	
+	 secure_request_out : out std_logic_vector(1 downto 0);
+	 confirm_secure_in : in std_logic_vector(1 downto 0); 
+    protected_hardware : out unsigned(7 downto 0);		 
 	 --Protected Hardware Bits
          --Bit 0: Trap F011 sector read/write
          --Bit 1: TBD

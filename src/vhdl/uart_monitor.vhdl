@@ -35,6 +35,8 @@ entity uart_monitor is
     bit_rate_divisor : out unsigned(13 downto 0);
     activity : out std_logic;
 
+    secure_request_in : in std_logic_vector(1 downto 0);
+	 secure_confirm_out : out std_logic_vector(1 downto 0); 
     protected_hardware_in : in unsigned(7 downto 0);
     uart_char : in unsigned(7 downto 0);
     uart_char_valid : in std_logic;
