@@ -371,7 +371,7 @@ architecture Behavioral of machine is
   signal monitor_char_out_valid : std_logic := '0';
   signal terminal_emulator_ready : std_logic := '0';
   signal secure_request : std_logic_vector(1 downto 0):="00";
-  signal secure_confirm : std_logic_vecotr(1 downto 0):="00"; 
+  signal secure_confirm : std_logic_vector(1 downto 0):="00"; 
 
 begin
 

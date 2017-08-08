@@ -53,7 +53,7 @@ entity gs4510 is
     hyper_trap_f011_read : in std_logic;
     hyper_trap_f011_write : in std_logic;
 	 secure_request_out : out std_logic_vector(1 downto 0);
-	 confirm_secure_in : in std_logic_vector(1 downto 0); 
+	 secure_confirm_in : in std_logic_vector(1 downto 0); 
     protected_hardware : out unsigned(7 downto 0);		 
 	 --Protected Hardware Bits
          --Bit 0: Trap F011 sector read/write
@@ -525,6 +525,11 @@ end component;
   
   signal monitor_mem_trace_toggle_last : std_logic := '0';
 
+  -- Secure mode signals
+  signal secure_mode_pending : std_logic :='0'; 
+  signal wipe_pending : std_logic :='0';
+  signal transfer_size : unsigned(7 downto 0) := x"00"; 
+  
   -- Microcode data and ALU routing signals follow:
 
   signal mem_reading : std_logic := '0';
@@ -608,6 +613,11 @@ end component;
     -- Hypervisor traps
     TrapToHypervisor,ReturnFromHypervisor,
     
+    --Secure Mode states
+    EnterSecureMode, EnterSecureMode1, 
+    ReturnFromSecureMode, ReturnFromSecureMode1,ReturnFromSecureMode2,
+    SecureWipeAll, SecureWipeNonTransfer,SecureWipeNonTransfer1,
+    
     -- DMAgic
     DMAgicTrigger,DMAgicReadList,DMAgicGetReady,
     DMAgicFill,
@@ -666,6 +676,8 @@ end component;
   signal state : processor_state := ResetLow;
   signal fast_fetch_state : processor_state := InstructionDecode;
   signal normal_fetch_state : processor_state := InstructionFetch;
+  
+  signal next_wipe_state : processor_state := SecureWipeNonTransfer1; 
   
   signal reg_microcode : microcodeops;
 
@@ -2842,7 +2854,7 @@ begin
         -- @IO:GS $D672.0 - Virtualise F011 floppy access via Hypervisor trap
         -- @IO:GS $D672.6 - Enable composited Matrix Mode, and disable UART access to serial monitor.
         if last_write_address = x"FFD3672" and hypervisor_mode='1' then
-          hyper_protected_hardware(7 downto 0) <= last_value;
+          hyper_protected_hardware(7 downto 0) <= last_value;          
         end if; 
 
         -- @IO:GS $D67C.0-7 - (write) Hypervisor write serial output to UART monitor
@@ -3302,6 +3314,71 @@ begin
                 monitor_mem_attention_granted <= '0';
                 state <= ProcessorHold;
               end if;
+              
+            when EnterSecureMode =>
+              secure_mode_pending <= '0';             
+              hyper_protected_hardware(7)<='1'; --enable secure container
+              hyper_protected_hardware(6)<='1'; --enable matrix mode
+              secure_request_out <="01"; --request entry prompt to monitor
+              state<=EnterSecureMode1;
+            when EnterSecureMode1 =>
+              --Wait here until response from monitor
+              
+              if secure_confirm_in = "01" then --accept
+                reg_pc <= x"8000";
+                reg_mb_low <= x"00";
+                reg_mb_high <= x"00";
+                reg_map_low <= "0000";
+                reg_map_high <= "0001"; --Block 4 Mapped
+                reg_offset_low <=x"000";
+                reg_offset_high <= x"160"; --24000-8000 = 16000, top 12 bits is x160
+                secure_request_out <= "00"; --de-assert request
+                state<=normal_fetch_state;
+              elsif secure_confirm_in = "10" then --reject
+                --End secure mode, hypervisor reloads non-transfer memory for user program
+                hyper_protected_hardware(7)<='0';
+                hypervisor_trap_port<="1000100"; --$44
+                secure_request_out <= "00";
+                state <= TrapToHypervisor;
+              end if; 
+              
+            when ReturnFromSecureMode =>
+              hyper_protected_hardware(6)<= '1'; --enter MM              
+              secure_request_out <= "10"; --request exit
+              transfer_size <= reg_x;
+              state<=ReturnFromSecureMode1;
+              
+            when ReturnFromSecureMode1 =>
+              if secure_confirm_in = "01" then --accept
+                state<= SecureWipeNonTransfer;                 
+              elsif secure_confirm_in = "10" then --reject
+                state<= SecureWipeAll; 
+              end if;
+
+            when SecureWipeNonTransfer => 
+              --test DMA routine to wipe 128KB RAM - transfer area
+              dmagic_src_addr(15 downto 8) <= x"00"; -- fill with zeros
+              dmagic_dest_addr(35 downto 8)<= x"00000"&transfer_size; --long address of start of RAM?
+              dmagic_count <= x"00000"; --wipe 64KB from transfer_size towards end of ram
+              dmagic_cmd(2)<='0'; --we dont want to chain and go to DMAgicTrigger state
+              wipe_pending<='1'; --haven't finished clearing memory. 
+              next_wipe_state<=SecureWipeNonTransfer1;
+              state <= DMAgicFill; 
+              
+            when SecureWipeNonTransfer1 => 
+              dmagic_src_addr(15 downto 8) <= x"00"; -- fill with zeros
+              dmagic_dest_addr(35 downto 8)<= x"000FFFF"; --start @ 64K in -> 128K end. 
+              dmagic_count <= x"00000"; --wipe 64KB
+              dmagic_cmd(2)<='0'; --we dont want to chain and go to DMAgicTrigger state
+              next_wipe_state <= ReturnFromSecureMode2;
+              
+            when ReturnFromSecureMode2 =>
+              wipe_pending<='0'; --no more wipe states. 
+              --Accept return from hypervisor            
+              hyper_protected_hardware(7)<='0'; --disable the secure container
+              hypervisor_trap_port <= "1000100"; --44                
+              state <= TrapToHypervisor; 
+                                
             when TrapToHypervisor =>
               -- Save all registers
               hyper_iomode(1 downto 0) <= unsigned(viciii_iomode);
@@ -3392,7 +3469,11 @@ begin
               -- clear hypervisor mode flag
               hypervisor_mode <= '0';
               -- start fetching next instruction
-              state <= normal_fetch_state;
+              if secure_mode_pending='1' then
+                state <= EnterSecureMode; 
+              else
+                state <= normal_fetch_state;
+              end if;
             when DMAgicTrigger =>
               -- Clear DMA pending flag
               report "DMAgic: Processing DMA request";
@@ -3546,11 +3627,15 @@ begin
                 report "DMAgic: DMA complete";
                 if dmagic_cmd(2) = '0' then
                   -- Last DMA job in chain, go back to executing instructions
+                  if wipe_pending = '1' then
+                    state<=next_wipe_state; 
+                  else 
                   state <= normal_fetch_state;
                   -- Reset DMAgic skip to normal at the end of the last DMA job
                   -- in a chain.
                   reg_dmagic_src_skip <= x"0100";
                   reg_dmagic_dst_skip <= x"0100";
+                  end if; 
                 else
                   -- Chain to next DMA job
                   state <= DMAgicTrigger;
@@ -5298,7 +5383,7 @@ begin
           if memory_access_address(27 downto 6)&"111111" = x"FFD367F" then
             hypervisor_trap_port(5 downto 0) <= memory_access_address(5 downto 0);
             hypervisor_trap_port(6) <= '0';
-            if hypervisor_mode = '0' then
+            if hypervisor_mode = '0' and hyper_protected_hardware(7)='0' then --Don't trap to hyp in secure mode
               report "HYPERTRAP: Hypervisor trap triggered by write to $D640-$D67F";
               state <= TrapToHypervisor;
             end if;
@@ -5307,7 +5392,16 @@ begin
               report "HYPERTRAP: Hypervisor return triggered by write to $D67F";
               report "           irq_pending = " & std_logic'image(irq_pending);
               report "           nmi_pending = " & std_logic'image(nmi_pending);
-              state <= ReturnFromHypervisor;
+              state <= ReturnFromHypervisor;            
+            end if;
+            if hypervisor_mode='1'
+              and memory_access_address(5 downto 0) = "110010" then              
+              state<=ReturnFromHypervisor;
+              secure_mode_pending<='1';
+            end if;
+            if hypervisor_mode='0' and hyper_protected_hardware(7)='1'
+              and memory_access_address(5 downto 0) = "110010" then
+              state<=ReturnFromSecureMode;
             end if;
             -- Don't increment PC if we were otherwise going to shortcut to
             -- InstructionDecode next cycle
