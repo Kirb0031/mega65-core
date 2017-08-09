@@ -676,9 +676,9 @@ begin
       bit_rate_divisor <= bit_rate_divisor_internal;
       
 		--If there is a secure request pending
-      if secure_request(0)/=secure_request(1) and secure_mode_ack='0' then
+      if secure_request_in(0)/=secure_request_in(1) and secure_mode_ack='0' then
         state <= SecureModeConfirm;    
-        secure_request_pending<=1;
+        secure_request_pending<='1';
       else
         secure_mode_ack<='0';
         secure_request_pending<='0';
@@ -952,11 +952,11 @@ begin
                   banner_position <= 1;
                   state <= PrintBanner;
                 elsif cmdbuffer(6 downto 1) = "accept" and secure_request_pending = '1' then
-                  confirm_secure<="01";
-                  secure_request_pending <= 0; 
+                  secure_confirm_out<="01";
+                  secure_request_pending <= '0'; 
                 elsif cmdbuffer(6 downto 1) = "reject" and secure_request_pending = '1' then                
-                  confirm_secure<="10"; 
-                  secure_request_pending <=0; 
+                  secure_confirm_out<="10"; 
+                  secure_request_pending <='0'; 
                 elsif cmdbuffer(1) = 'c' or cmdbuffer(1) = 'C' then
                   print_hex("000000"&monitor_char_toggle&monitor_char_toggle_last&monitor_char&monitor_char_count,7,NextCommand);
                 elsif cmdbuffer(1) = 's' or cmdbuffer(1) = 'S' then
@@ -1620,9 +1620,9 @@ begin
 
             when SecureModeConfirm1 => 
               banner_position <=1; --reset banner position
-              if secure_mode_request = "01" then
+              if secure_request_in = "01" then
                 state<=PrintSecModeEntry;					 
-              elsif secure_mode_request = "10" then
+              elsif secure_request_in = "10" then
                 state<=PrintSecModeExit;
               end if; 
               

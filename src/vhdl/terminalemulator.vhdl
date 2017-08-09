@@ -103,7 +103,7 @@ begin
             else
               if escCmd='1' then
                 --is an esc command
-                if rx_data = x"63" then --c
+                if char_in = x"63" then --c
                   clearLineStart <= CharMemStart;
                   state<=clearScreen;
                   escCmd<='0';
@@ -198,7 +198,7 @@ begin
 
         when clearScreen=> 
         --Wipe all screen memory and set everything to charMemStart
-          wel_out<='1';
+          wel_out<=b"1";
           addrl_out<=clearLineStart;
           dinl_out<=(others=>'0');
           clearLineStart<=clearLineStart+1;
@@ -211,12 +211,12 @@ begin
             topofframe<=CharMemStart;
             charX<=(others=>'0');
             charCursor<=CharMemStart;
-            wel_out<='0';
+            wel_out<=b"0";
             state<=clearAck;
           end if;                      
           
         when processCommand =>        	
-          if rx_data = x"1B" then 
+          if char_in = x"1B" then 
             escCmd<='1';
           elsif char_in = x"0D" then --CR carriage return		  
             charCursor<=lastLineStart; --go back to start of line?
