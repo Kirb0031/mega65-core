@@ -48,7 +48,7 @@ end terminalemulator;
 
 architecture Behavioral of terminalemulator is
 
-  type terminal_emulator_state is (clearAck,
+  type terminal_emulator_state is (clearAck, clearScreen,
                                    incChar,
                                    writeChar, writeChar2,
                                    waitforinput,
@@ -59,7 +59,7 @@ architecture Behavioral of terminalemulator is
                                    linefeed, linefeed2,
                                    backspace,
                                    writeCursor,writeCursor2,
-                                   clearCursor,clearCursor2);--,nextchar, carRet, linefeed);--clearFrame
+                                   clearCursor,clearCursor2);
   signal state : terminal_emulator_state := waitforinput;
   signal next_state : terminal_emulator_state;
 
@@ -75,9 +75,10 @@ architecture Behavioral of terminalemulator is
   signal topofframe : unsigned(11 downto 0):=CharMemStart;--(others=>'0'); --position of topofframe in memory. Ring buffer
 --has the characters hit the bottom of the frame for the first time? If so always scroll text up on next line.
   signal hasHitEoF : std_logic:='0'; 
+  signal escCmd : std_logic :='0'; 
 begin
 
-  topofframe_out <= topOfFrame;--b"000000000000";--topOfFrame;
+  topofframe_out <= topOfFrame;
   
   uart_receive: process (clk)
   begin
@@ -93,16 +94,27 @@ begin
             elsif char_in =x"0A" then
               --(Uart monitor sends CR then LF, so we can check if its on first character)
               if charX=x"00" then --Don't clear first character. 
-                state<=processCommand;
+                state<=processCommand;              
               else
                 state<=clearCursor; --Clear character (for LF no CR, on Syntax Errors)
                 next_state<=processCommand;
               end if;
               
-            else 			 
-              state<=writeChar;
-              dataToWrite<=char_in-32;
+            else
+              if escCmd='1' then
+                --is an esc command
+                if rx_data = x"63" then --c
+                  clearLineStart <= CharMemStart;
+                  state<=clearScreen;
+                  escCmd<='0';
+                end if; 
+                
+              else                
+                state<=writeChar;
+                dataToWrite<=char_in-32;
+              end if; 
             end if;
+            
           end if;
           
         --Write cursor by setting bit 7 of the memory location, which will invert output.		
@@ -132,9 +144,9 @@ begin
           state<=next_state;
           
         when writeChar =>
-          addrl_out<=charCursor; --latch address
-          dinl_out<=dataToWrite; --latch output data		  
-          wel_out<=b"1"; --enable write
+          addrl_out<=charCursor; 
+          dinl_out<=dataToWrite; 
+          wel_out<=b"1"; 
           state<=WriteChar2;
           
         when writeChar2 =>	
@@ -149,8 +161,8 @@ begin
             charX<=(others=>'0'); 
             if charCursor >= CharMemEnd then--x"C7F" then --if its at the end of a frame
               state<=newFrame;			  
-              charCursor<=CharMemStart;--(others=>'0');
-              lastLineStart<=CharMemStart;--others=>'0');
+              charCursor<=CharMemStart;
+              lastLineStart<=CharMemStart;
               hasHitEoF<='1';
             else 
               charCursor<=charCursor+1;				
@@ -166,11 +178,11 @@ begin
           end if;
           
         when newFrame=>
-          charCursor<=CharMemStart;--(others=>'0');
-          lastLineStart<=CharMemStart;--(others=>'0');
+          charCursor<=CharMemStart;
+          lastLineStart<=CharMemStart;
           charX<=(others=>'0');
           hasHitEoF<='1';
-          clearLineStart<=CharMemStart;--(others=>'0');
+          clearLineStart<=CharMemStart;
           clearLineEnd<=CharMemStart+80;
           state<=ClearLine;
           
@@ -183,9 +195,30 @@ begin
         when newLine2=>  
           next_state<=clearAck;
           state<=clearLine;
+
+        when clearScreen=> 
+        --Wipe all screen memory and set everything to charMemStart
+          wel_out<='1';
+          addrl_out<=clearLineStart;
+          dinl_out<=(others=>'0');
+          clearLineStart<=clearLineStart+1;
+          
+          if (clearLineStart=CharMemEnd) then
+            hasHitEoF <='0';
+            lastLineStart<=CharMemStart;
+            clearLineStart<=CharMemStart;
+            clearLineEnd<=CharMemStart+80;
+            topofframe<=CharMemStart;
+            charX<=(others=>'0');
+            charCursor<=CharMemStart;
+            wel_out<='0';
+            state<=clearAck;
+          end if;                      
           
         when processCommand =>        	
-          if char_in = x"0D" then --CR carriage return		  
+          if rx_data = x"1B" then 
+            escCmd<='1';
+          elsif char_in = x"0D" then --CR carriage return		  
             charCursor<=lastLineStart; --go back to start of line?
             charX<=(others=>'0');
             state<=clearAck;	
@@ -197,8 +230,7 @@ begin
             charCursor<=charCursor-1;
             charX<=charX-1;			
             dataToWrite<=x"00";
-            wel_out<=b"1";			 
-            --state<=backspace;
+            wel_out<=b"1";			             
             state<=writeCursor;
             next_state<=clearAck;
             
