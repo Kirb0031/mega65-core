@@ -52,7 +52,7 @@ entity gs4510 is
     matrix_trap_in : in std_logic;
     hyper_trap_f011_read : in std_logic;
     hyper_trap_f011_write : in std_logic;
-	 secure_request_out : out std_logic_vector(1 downto 0);
+	 secure_request_out : out std_logic_vector(1 downto 0):=x"00";
 	 secure_confirm_in : in std_logic_vector(1 downto 0); 
     protected_hardware : out unsigned(7 downto 0);		 
 	 --Protected Hardware Bits
@@ -1254,6 +1254,13 @@ begin
 
       -- CPU starts in hypervisor
       hypervisor_mode <= '1';
+      
+      -- Sec Mode:
+      
+      hyper_protected_hardware <= x"00";
+      secure_request_out <= "00";
+      
+      
       
       instruction_phase <= x"0";
       
@@ -3359,7 +3366,7 @@ begin
               --test DMA routine to wipe 128KB RAM - transfer area
               dmagic_src_addr(15 downto 8) <= x"00"; -- fill with zeros
               dmagic_dest_addr(35 downto 8)<= x"00000"&transfer_size; --long address of start of RAM?
-              dmagic_count <= x"00000"; --wipe 64KB from transfer_size towards end of ram
+              dmagic_count <= x"0000"; --wipe 64KB from transfer_size towards end of ram
               dmagic_cmd(2)<='0'; --we dont want to chain and go to DMAgicTrigger state
               wipe_pending<='1'; --haven't finished clearing memory. 
               next_wipe_state<=SecureWipeNonTransfer1;
@@ -3368,7 +3375,7 @@ begin
             when SecureWipeNonTransfer1 => 
               dmagic_src_addr(15 downto 8) <= x"00"; -- fill with zeros
               dmagic_dest_addr(35 downto 8)<= x"000FFFF"; --start @ 64K in -> 128K end. 
-              dmagic_count <= x"00000"; --wipe 64KB
+              dmagic_count <= x"0000"; --wipe 64KB
               dmagic_cmd(2)<='0'; --we dont want to chain and go to DMAgicTrigger state
               next_wipe_state <= ReturnFromSecureMode2;
               

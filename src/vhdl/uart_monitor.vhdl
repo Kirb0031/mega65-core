@@ -36,7 +36,7 @@ entity uart_monitor is
     activity : out std_logic;
 
     secure_request_in : in std_logic_vector(1 downto 0);
-    secure_confirm_out : out std_logic_vector(1 downto 0); 
+    secure_confirm_out : out std_logic_vector(1 downto 0):=x"00"; 
     protected_hardware_in : in unsigned(7 downto 0);
     uart_char : in unsigned(7 downto 0);
     uart_char_valid : in std_logic;
@@ -951,10 +951,10 @@ begin
                 if (cmdbuffer(1) = 'h' or cmdbuffer(1) = 'H' or cmdbuffer(1) = '?') then
                   banner_position <= 1;
                   state <= PrintBanner;
-                elsif cmdbuffer(6 downto 1) = "accept" and secure_request_pending = '1' then
+                elsif cmdbuffer(1 to 6) = "accept" and secure_request_pending = '1' then
                   secure_confirm_out<="01";
                   secure_request_pending <= '0'; 
-                elsif cmdbuffer(6 downto 1) = "reject" and secure_request_pending = '1' then                
+                elsif cmdbuffer(1 to 6) = "reject" and secure_request_pending = '1' then                
                   secure_confirm_out<="10"; 
                   secure_request_pending <='0'; 
                 elsif cmdbuffer(1) = 'c' or cmdbuffer(1) = 'C' then
